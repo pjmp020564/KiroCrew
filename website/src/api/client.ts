@@ -155,6 +155,10 @@ export type {
   SecretsListResponse,
   SecretUsagePlace,
   SecretsUsageResponse,
+  SecretBackendError,
+  SecretBackendFormField,
+  SecretBackendItem,
+  SecretBackendView,
 } from './client/security'
 export type {
   RemoteControlState,
