@@ -1256,6 +1256,7 @@ if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and
         api_mcp_measure_start,
         api_mcp_probe,
         api_mcp_probe_cached,
+        api_mcp_probe_one,
         api_mcp_quarantine_clear,
         api_mcp_servers,
     )
