@@ -233,6 +233,7 @@
       "local-token.js",
       "local-gateway.js",
       "close-action.js",
+      "close-hide-notice.js",
       "tray-icon.js",
       "minimize-to-tray.js",
       "wsl-detection.js",

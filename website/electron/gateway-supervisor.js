@@ -154,6 +154,9 @@ function createGatewaySupervisor({
   // prune that removed the bundled backend can have removed this app's own
   // files, and only the caller decides what to do about that.
   onStaleBundleRespawn = () => {},
+  // Told whenever the gateway child this app spawned starts, exits or is
+  // dropped, so a caller can re-read stopsGatewayOnQuit (the tray quit label).
+  onOwnedGatewayChange = () => {},
   // The active theme pack's splash art as a file: URL, "" for none
   // (themeSplashUrl in theme-splash.js); every loading.html paint carries it.
   currentThemeSplash = () => "",
@@ -225,6 +228,14 @@ function createGatewaySupervisor({
   // attempt has ended this way.
   let localStartUnverifiable = 0;
   let gatewayProcess = null;
+  const notifyOwnedGatewayChange = () => {
+    try { onOwnedGatewayChange(); } catch { /* a label refresh never breaks the supervisor */ }
+  };
+  // Every write of the owned child goes through here so the caller hears of it.
+  const setOwnedChild = (child) => {
+    gatewayProcess = child;
+    notifyOwnedGatewayChange();
+  };
   // Exactly one ownership state is authoritative:
   //   none            external/unknown; never kill or respawn
   //   spawned         this app owns the child; recovery may kill and respawn
@@ -464,7 +475,7 @@ function createGatewaySupervisor({
     posixDescendantPids, isTrustedWindowsGatewayCommand, sameHomeGatewayPid, runGatewayStop,
     isCurrentBundleGateway, getRunLocalGateway, getGatewayOwnership,
     getGatewayProcess: () => gatewayProcess,
-    setGatewayProcess: (child) => { gatewayProcess = child; },
+    setGatewayProcess: setOwnedChild,
     setSpawnedExecutablePaths: (paths) => { spawnedExecutablePaths = paths; },
   });
   const { respawnGateway } = createRespawnOwner({
@@ -962,7 +973,7 @@ function createGatewaySupervisor({
         ),
       }, { bundled, platform: processObj.platform, discoverProxyEnv: discoverGatewayProxyEnv }),
     });
-    gatewayProcess = child;
+    setOwnedChild(child);
     gatewayOwnership = "spawned";
     if (IS_WIN) {
       spawnedExecutablePaths = windowsGatewayExecutablePaths(spawnBin, {
@@ -1023,7 +1034,7 @@ function createGatewaySupervisor({
       if (verdict === "reresolve") {
         reresolveAttempts += 1;
         glog(`stale bundle (${cause} on bin=${bin}) — re-resolving the backend and respawning (attempt ${reresolveAttempts})`);
-        gatewayProcess = null;
+        setOwnedChild(null);
         spawnedExecutablePaths = [];
         gatewayStartFailure = null;
         spawnGateway(resolve);
@@ -1043,7 +1054,7 @@ function createGatewaySupervisor({
         gatewayStartFailure = { error: error.message, bundled };
         // A spawn that never ran emits no `exit`, so nothing else clears the slot,
         // and a kept dead child makes every Retry read the gateway as running.
-        gatewayProcess = null;
+        setOwnedChild(null);
         sendStatus(`Gateway failed: ${error.message}`);
         resolve(false);
       };
@@ -1051,6 +1062,10 @@ function createGatewaySupervisor({
       giveUp();
     });
     child.on("exit", (code, signal) => {
+      // A signal kill leaves exitCode null, so this can still read the child as
+      // live. For the current child a signal kill always takes giveUp below,
+      // which clears the slot and announces again.
+      notifyOwnedGatewayChange();
       const exitMessage = `gateway child exited code=${code} signal=${signal}`;
       const currentChild = gatewayProcess === child;
       const expectedExit = !currentChild || quitting() || installingUpdate || switchingToRemote
@@ -1066,7 +1081,7 @@ function createGatewaySupervisor({
       spawnedExecutablePaths = [];
       const giveUp = () => {
         if (!gatewayStartFailure) gatewayStartFailure = { code, signal, bundled };
-        gatewayProcess = null;
+        setOwnedChild(null);
       };
       if (recoverStaleBackend({ exitCode: code, giveUp })) return;
       giveUp();
@@ -1221,7 +1236,7 @@ function createGatewaySupervisor({
     // sweep before probing the port or descendants escape and retain locks.
     await killGatewayProcessTree(gatewayProcess, "SIGKILL");
     if (stale()) return;
-    gatewayProcess = null;
+    setOwnedChild(null);
     spawnedExecutablePaths = [];
     let freed = true;
     let foreignHolder = false;
@@ -1763,6 +1778,8 @@ function createGatewaySupervisor({
     isCurrentBundleGateway,
     stopForUpdate: stopGatewayForUpdate,
     stopOnQuit: stopGatewayOnQuit,
+    // True while a gateway this app spawned is alive: the one stopOnQuit stops.
+    stopsGatewayOnQuit: () => gatewayProcess !== null && gatewayProcess.exitCode === null,
     // After sleep the old forward can look alive while carrying nothing, so a
     // wake rebuilds it at once instead of waiting out ssh's keepalive.
     reopenTunnel: () => tunnelKeeper.restart(),
