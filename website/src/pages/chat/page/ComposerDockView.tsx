@@ -768,7 +768,12 @@ export default function ComposerDockView({
               derivePctFromUsed={contextTokens?.used != null && contextTokens.window == null}
               showContextPct={chatConfig.showContextPct}
               showContextTokens={chatConfig.showContextTokens}
+              // A bot's own thread draws no environment chip: where a bot's work
+              // runs is its Settings page's Workers run on choice. Its placement
+              // is still read, so a thread already on a profile keeps the local
+              // project picker hidden.
               environmentSlot={activeSlot}
+              environmentChipHidden={currentSlot?.mode === 'member'}
               isRunning={composerBusy}
               projectTurnKey={projectTurnKey}
               projectLocked={projectLocked}

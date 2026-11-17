@@ -124,6 +124,7 @@ export default function ChatPane({
   agentLocked,
   composerInput: ComposerInput = ChatInput,
   frameless,
+  environmentChipHidden = false,
   topInset = 0,
   followContentWidth,
   pushToTalk = false,
@@ -1346,6 +1347,7 @@ export default function ChatPane({
           busyMode={composerBusyMode}
           autoFocusKey={slotKey}
           environmentSlot={slotKey}
+          environmentChipHidden={environmentChipHidden}
           agentName={paneAgentName}
           // The chip shows the inherited-default marker; `agentName` stays the
           // raw resolved alias for the skills query and switch title. Uses the
