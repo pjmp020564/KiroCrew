@@ -687,7 +687,7 @@ def _cron_dispatch(args: argparse.Namespace) -> None:
             print("No cron jobs." if want_folder is None else "No cron jobs in that folder.")
             return
         for j in jobs:
-            status = "✅" if j.enabled else "⏸️"
+            status = "on " if j.enabled else "off"
             sched = _format_schedule(j.schedule, tz_name=job_zone_name(j))
             folder = _cron_folder_label(j.folder_id or "", folder_names)
             # Name and message are agent-authored, like the folder name.
@@ -1206,16 +1206,16 @@ def _cron_preview(args: argparse.Namespace) -> None:
     outcome = "ok"
     try:
         func(ctx)
-        print("\n✅ Completed (no exception raised)")
+        print("\nDone: Completed (no exception raised)")
     except Skip:
-        print("\n⏭️  Skip (nothing to report)")
+        print("\nSkipped: nothing to report")
     except Report as r:
-        print(f"\n📢 Report:\n{r}")
+        print(f"\nReport:\n{r}")
     except Done as d:
-        print(f"\n🏁 Done:\n{d}")
+        print(f"\nDone:\n{d}")
     except Exception as e:
         outcome = "error"
-        print(f"\n❌ Error: {type(e).__name__}: {e}")
+        print(f"\nError: {type(e).__name__}: {e}")
         traceback.print_exc()
     finally:
         ctx.close()
