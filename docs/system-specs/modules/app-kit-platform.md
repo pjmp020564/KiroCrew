@@ -7447,10 +7447,18 @@ cancel_ack_secs)` runs one turn under `ToolApprovalPolicy.HOOK_BASED` with
 `app=<ctx.name>`, so the PreToolUse gate resolves `POLICY ∩ PROFILE` for this app,
 and passes the gateway's approval prompt as `on_tool_approval`: `_init_task_runner`
 registers `agent_turn_sdk.set_turn_approver(lambda app:
-self._interactive_approval("app", requester=f"app {app}"))`, so a call the gate
-neither denies nor grants asks the owner as a cron job's does (`"app"` is in
-`_BACKGROUND_APPROVAL_SOURCES`, the deny-fast unattended window) instead of reaching
-`_resolve_permission`'s caller-less default approve. With no prompt registered (a
+self._interactive_approval("app", requester=f"app {app}",
+follows_approval_mode=own_agent))`, where `run()` passes `own_agent` from
+`_is_own_agent(app, <recorded agent>)` (the `<app>--<agent>.json` filename proof
+`spawn_sdk._own_agents` uses; a name another file also declares, a Crew-generated
+spec or an unreadable roster is not own), so a call the gate neither denies nor grants asks the
+owner as a cron job's does (`"app"` is in `_BACKGROUND_APPROVAL_SOURCES`, the
+deny-fast unattended window) instead of reaching `_resolve_permission`'s caller-less
+default approve. `follows_approval_mode` makes that prompt answer as a channel turn
+does under the gateway's approval mode (`--approval`, else `agent.approval_mode`):
+under `auto` the call is approved without asking, unless it falls under a held Bot
+limit, is a low-fidelity child request, or `session_mode_permitted("trust")` is
+false. With no prompt registered (a
 bare test application) the turn passes an approver that refuses, so a call the gate
 does not settle is rejected, with or without a hook manager. The turn is admitted through
 `run_admitted_or_raise(automation=True,

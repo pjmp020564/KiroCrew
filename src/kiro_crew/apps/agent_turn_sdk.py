@@ -13,8 +13,10 @@ it fixes the parts an app must not choose:
   gate (``HOOK_BASED``); :meth:`AgentTurnSDK.run_oneshot` rejects every tool
   (``REJECT_ALL``). No method takes an approval policy, so an app cannot ask for
   auto-approval. A call the gate neither denies nor grants goes to the owner's
-  approval prompt, the one cron jobs use (:func:`set_turn_approver`), never
-  straight to an approve.
+  approval prompt, the one cron jobs use (:func:`set_turn_approver`), never to
+  the caller-less default approve; under the gateway's ``auto`` approval mode that
+  prompt approves it without asking, as a channel turn's does, but only when the
+  session runs one of the app's own agents (``<app>--<agent>.json``).
 * **Admission.** Every turn is admitted as Crew automation
   (``OperationKind.BACKGROUND``); a refusal raises ``TurnRefused`` and the work
   never runs.
@@ -68,25 +70,49 @@ class AgentTurnRefused(PermissionError):
     """The app's ``capabilities.spawn`` ceiling refuses the agent this turn runs."""
 
 
-#: The gateway's approval prompt for app turns: called with the app's name, it
-#: returns the ``on_tool_approval`` callback a turn of that app asks. ``None``
-#: until a gateway registers one (a bare test application).
-_turn_approver: Callable[[str], Any] | None = None
+#: The gateway's approval prompt for app turns: called with the app's name and
+#: whether the turn runs one of that app's own agents (``own_agent``), it returns
+#: the ``on_tool_approval`` callback the turn asks. ``None`` until a gateway
+#: registers one (a bare test application).
+_turn_approver: Callable[..., Any] | None = None
 
 
-def set_turn_approver(factory: Callable[[str], Any] | None) -> None:
+def set_turn_approver(factory: Callable[..., Any] | None) -> None:
     """Register the gateway's approval prompt for every app turn (``None`` clears it).
 
     Without one, a call the hook gate neither denies nor grants is refused; with
-    one it asks the owner, as a cron job's call does.
+    one it asks the owner, as a cron job's call does. *factory* is called as
+    ``factory(app, own_agent=...)``.
     """
     global _turn_approver
     _turn_approver = factory
 
 
-def _approver_for(app: str) -> Any:
+def _approver_for(app: str, *, own_agent: bool) -> Any:
     factory = _turn_approver
-    return factory(app) if factory is not None else None
+    return factory(app, own_agent=own_agent) if factory is not None else None
+
+
+def _is_own_agent(app: str, agent: str) -> bool:
+    """Whether *agent* is one of *app*'s own agents. Blocking; fails closed.
+
+    The proof is the one ``spawn_sdk._own_agents`` uses: an app's agents are
+    materialized as ``<app>--<agent>.json``, so the filename prefix names the
+    owner. Kiro Crew's own generated specs never count, and a name that any
+    other agent file also declares (the host agent, another app's agent) is
+    refused, since the name alone could not say which file runs.
+    """
+    from kiro_crew.agent_discovery import is_internal_agent_spec, list_agents
+
+    prefix = f"{app}--"
+    try:
+        same_name = [a for a in list_agents() if a.name == agent]
+    except Exception:
+        logger.warning("%s: agents unreadable; app turn is not own-agent", app, exc_info=True)
+        return False
+    return bool(same_name) and all(
+        a.filename.startswith(prefix) and not is_internal_agent_spec(a) for a in same_name
+    )
 
 
 async def _refuse_unsettled(_event: Any) -> bool:
@@ -266,12 +292,17 @@ class AgentTurnSDK:
         )
         try:
             running = await self._require_recorded_agent(sessions, key, asked)
+            # Only a turn on one of the app's own agents may follow the gateway's
+            # ``auto`` mode: the host default agent or another app's agent asked
+            # by an app is the escalation ``ctx.spawn`` refuses, so it is asked.
+            # Inside this guard, so a cancel during the read releases the lease.
+            own_agent = await asyncio.to_thread(_is_own_agent, self._app, running)
         except BaseException:
             sessions.release(key)
             raise
         app = self._app
         hooks = self._hooks()
-        approver = _approver_for(app) or _refuse_unsettled
+        approver = _approver_for(app, own_agent=own_agent) or _refuse_unsettled
 
         async def _run_turn() -> str:
             from kiro_crew.dashboard.session_directive_apply import person_only_directive_refuser

@@ -31,6 +31,8 @@ from kiro_crew.shared_crew import turn_gate
 from kiro_crew.slack.gateway_runtime.tool_policy import _BACKGROUND_APPROVAL_SOURCES
 
 APP = "turn-probe"
+#: The real ownership check; the autouse seam below replaces it for turn tests.
+_REAL_IS_OWN_AGENT = getattr(agent_turn_sdk, "_is_own_agent", None)
 #: Names a hang only; every awaited turn here finishes on its own signal.
 _BOUND = 30.0
 
@@ -76,6 +78,9 @@ def _turn_seams(_floor_monkeypatch: pytest.MonkeyPatch) -> None:
 
     _floor_monkeypatch.setattr(turn_gate, "run_admitted_or_raise", _admit)
     _floor_monkeypatch.setattr(agent_turn_sdk, "_turn_approver", None, raising=False)
+    _floor_monkeypatch.setattr(
+        agent_turn_sdk, "_is_own_agent", lambda _app, _agent: False, raising=False
+    )
 
 
 def _register(monkeypatch: pytest.MonkeyPatch, factory: Any) -> None:
@@ -133,7 +138,7 @@ def test_an_unsettled_call_asks_the_registered_prompt_and_its_no_rejects(
 ):
     asked: list[tuple[str, str]] = []
 
-    def _factory(app: str):
+    def _factory(app: str, **_kw: Any):
         async def _approve(event: Any) -> bool:
             asked.append((app, event.request_id))
             return False
@@ -151,10 +156,112 @@ def test_an_unsettled_call_the_prompt_approves_runs(monkeypatch, one_tool_call):
     async def _approve(_event: Any) -> bool:
         return True
 
-    _register(monkeypatch, lambda _app: _approve)
+    _register(monkeypatch, lambda _app, **_kw: _approve)
     provider = _run_turn()
 
     assert (provider.approved, provider.rejected) == (["r1"], [])
+
+
+@pytest.mark.parametrize("own", [True, False])
+def test_the_prompt_is_told_whether_the_turn_runs_the_apps_own_agent(
+    monkeypatch, one_tool_call, own
+):
+    """The recorded agent decides ``own_agent``; only an own agent may follow Auto."""
+    seen: list[tuple[str, str]] = []
+
+    def _own(app: str, agent: str) -> bool:
+        seen.append((app, agent))
+        return own
+
+    monkeypatch.setattr(agent_turn_sdk, "_is_own_agent", _own)
+    told: list[bool] = []
+
+    def _factory(_app: str, *, own_agent: bool):
+        told.append(own_agent)
+
+        async def _approve(_event: Any) -> bool:
+            return False
+
+        return _approve
+
+    _register(monkeypatch, _factory)
+    _run_turn()
+
+    assert seen == [(APP, "host-default")]
+    assert told == [own]
+
+
+def test_a_cancel_during_the_ownership_read_releases_the_session(monkeypatch):
+    """The read runs after the lease is taken; a cancel there must not leak it."""
+    released: list[str] = []
+
+    class _Releasing(_Manager):
+        def release(self, key: str) -> None:
+            released.append(key)
+
+    def _cancelled(_app: str, _agent: str) -> bool:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(agent_turn_sdk, "_is_own_agent", _cancelled)
+    sdk = AgentTurnSDK(APP, lambda: _Releasing(_Provider()), HookManager)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(asyncio.wait_for(sdk.run(f"{APP}-n-1", "a line"), _BOUND))
+
+    assert released == [f"{APP}-n-1"]
+
+
+def _agent(name: str, filename: str) -> Any:
+    info = MagicMock()
+    info.name = name
+    info.filename = filename
+    return info
+
+
+@pytest.mark.parametrize(
+    ("agents", "expected"),
+    [
+        # The app's own materialized agent.
+        ([_agent("note-taker", f"{APP}--note-taker.json")], True),
+        # The host default agent, or another app's agent, is not the app's own.
+        ([_agent("note-taker", "note-taker.json")], False),
+        ([_agent("note-taker", "other--note-taker.json")], False),
+        # A name another file also declares cannot prove which file runs.
+        (
+            [
+                _agent("note-taker", f"{APP}--note-taker.json"),
+                _agent("note-taker", "note-taker.json"),
+            ],
+            False,
+        ),
+        # No such agent at all.
+        ([], False),
+    ],
+)
+def test_only_an_agent_file_under_the_apps_prefix_is_its_own(monkeypatch, agents, expected):
+    from kiro_crew import agent_discovery
+
+    monkeypatch.setattr(agent_discovery, "list_agents", lambda: agents)
+    monkeypatch.setattr(agent_discovery, "is_internal_agent_spec", lambda _a: False)
+
+    assert _REAL_IS_OWN_AGENT is not None
+    assert _REAL_IS_OWN_AGENT(APP, "note-taker") is expected
+
+
+def test_a_crew_generated_spec_or_an_unreadable_roster_is_not_own(monkeypatch):
+    from kiro_crew import agent_discovery
+
+    own = [_agent("note-taker", f"{APP}--note-taker.json")]
+    monkeypatch.setattr(agent_discovery, "list_agents", lambda: own)
+    monkeypatch.setattr(agent_discovery, "is_internal_agent_spec", lambda _a: True)
+    assert _REAL_IS_OWN_AGENT is not None
+    assert _REAL_IS_OWN_AGENT(APP, "note-taker") is False
+
+    def _boom() -> list[Any]:
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(agent_discovery, "list_agents", _boom)
+    assert _REAL_IS_OWN_AGENT(APP, "note-taker") is False
 
 
 def test_with_no_prompt_registered_an_unsettled_call_is_refused(one_tool_call):
@@ -189,9 +296,116 @@ def test_the_gateway_registers_its_cron_style_prompt_for_app_turns(monkeypatch):
         orch._init_task_runner()
     monkeypatch.setattr(orch, "_interactive_approval", _interactive_approval)
 
-    assert agent_turn_sdk._turn_approver("meetings") is callback
-    assert calls == [("app", {"requester": "app meetings"})]
-    assert calls == [("app", {"requester": "app meetings"})]
+    assert agent_turn_sdk._turn_approver("meetings", own_agent=True) is callback
+    assert agent_turn_sdk._turn_approver("meetings", own_agent=False) is callback
+    assert calls == [
+        ("app", {"requester": "app meetings", "follows_approval_mode": True}),
+        ("app", {"requester": "app meetings", "follows_approval_mode": False}),
+    ]
+
+
+def _gateway(*, cli_mode: str | None, config_mode: str) -> Any:
+    """An orchestrator with no Slack whose prompt is the dashboard's, which refuses."""
+    from kiro_crew.slack.gateway import GatewayOrchestrator
+
+    gateway = GatewayOrchestrator.__new__(GatewayOrchestrator)
+    gateway.sessions = MagicMock()
+    gateway.sessions.get_channel = MagicMock(return_value=None)
+    gateway.sessions.get_thread = MagicMock(return_value=None)
+    gateway.slack = None
+    gateway._owner_id = None
+    gateway.dashboard_state = MagicMock()
+    gateway.dashboard_state._slots = {}
+    gateway.dashboard_state.request_approval = AsyncMock(return_value=False)
+    gateway.dashboard_state.resolve_approval = MagicMock()
+    gateway._cfg = MagicMock()
+    gateway._cfg.hooks.get = MagicMock(return_value=[])
+    gateway._cfg.agent.approval_mode = config_mode
+    gateway._approval_mode = cli_mode
+    return gateway
+
+
+def _fs_write() -> LLMEvent:
+    return LLMEvent(kind=EVENT_PERMISSION_REQUEST, request_id="w1", title="fs_write notes.md")
+
+
+@pytest.mark.parametrize(
+    ("cli_mode", "config_mode", "follows", "asked"),
+    [
+        # An app turn under ``auto`` runs a call the gate did not deny, as a
+        # channel turn under ``auto`` does.
+        (None, "auto", True, False),
+        # Under ``interactive`` the owner is still asked.
+        (None, "interactive", True, True),
+        # The CLI flag wins over config, as for a channel.
+        ("interactive", "auto", True, True),
+        # A cron job's prompt does not follow the mode: it has its own ``auto``.
+        (None, "auto", False, True),
+    ],
+)
+def test_an_app_prompt_follows_the_gateway_approval_mode(
+    monkeypatch, cli_mode, config_mode, follows, asked
+):
+    from kiro_crew import approval_mode_policy, mate_held_rules
+
+    monkeypatch.setattr(mate_held_rules, "held_for", lambda *a, **k: [])
+    monkeypatch.setattr(approval_mode_policy, "session_mode_permitted", lambda _m: True)
+    gateway = _gateway(cli_mode=cli_mode, config_mode=config_mode)
+    callback = gateway._interactive_approval(
+        "app", requester="app meetings", follows_approval_mode=follows
+    )
+    audit = MagicMock()
+
+    with (
+        patch("kiro_crew.slack.handler.is_yolo_mode", return_value=False),
+        patch("kiro_crew.slack.gateway.sel", lambda: audit),
+    ):
+        result = asyncio.run(asyncio.wait_for(callback(_fs_write(), ""), _BOUND))
+
+    assert result is (not asked)
+    assert gateway.dashboard_state.request_approval.await_count == int(asked)
+    audited = [
+        c.kwargs.get("operation")
+        for c in audit.log_api_access.call_args_list
+        if c.kwargs.get("operation") == "app.approval_mode_auto_approve"
+    ]
+    assert len(audited) == int(not asked)
+
+
+def _low_fidelity_child() -> MagicMock:
+    event = MagicMock()
+    event.request_id = "c1"
+    event.title = "fs_write notes.md"
+    event.tool_input = ""
+    event.tool_purpose = ""
+    event.child_low_fidelity = True
+    event.child_unconditional_grant_eligible = False
+    return event
+
+
+@pytest.mark.parametrize("cause", ["held", "policy", "child"])
+def test_under_auto_a_held_policy_denied_or_child_call_still_asks(monkeypatch, cause):
+    """A held Bot limit, a policy that denies ``trust`` or a low-fidelity child request
+    goes to the owner's prompt, never to a refusal nobody was asked about."""
+    from kiro_crew import approval_mode_policy, mate_held_rules
+
+    monkeypatch.setattr(
+        mate_held_rules, "held_for", lambda *a, **k: ["deny writes"] if cause == "held" else []
+    )
+    monkeypatch.setattr(
+        approval_mode_policy, "session_mode_permitted", lambda _m: cause != "policy"
+    )
+    gateway = _gateway(cli_mode=None, config_mode="auto")
+    callback = gateway._interactive_approval(
+        "app", requester="app meetings", follows_approval_mode=True
+    )
+    event = _low_fidelity_child() if cause == "child" else _fs_write()
+
+    with patch("kiro_crew.slack.handler.is_yolo_mode", return_value=False):
+        result = asyncio.run(asyncio.wait_for(callback(event, ""), _BOUND))
+
+    assert result is False
+    gateway.dashboard_state.request_approval.assert_awaited_once()
 
 
 def test_an_app_prompt_takes_the_unattended_approval_window():
