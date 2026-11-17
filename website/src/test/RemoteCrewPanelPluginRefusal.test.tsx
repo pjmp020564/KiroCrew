@@ -100,7 +100,7 @@ async function openSetup(preflight: CloudPreflight) {
   vi.mocked(api.cloudPreflight).mockResolvedValue(preflight)
   const u = userEvent.setup()
   renderWithProviders(<RemoteCrewPanel />)
-  await u.click(await screen.findByRole('radio', { name: /Set up a new one/i }))
+  await u.click(await screen.findByRole('button', { name: 'Add Crew' })); await u.click(await screen.findByRole('button', { name: /Set up a new Crew/ }))
   const notice = (await screen.findByText(/^Found at \/usr\/local\/sessionmanagerplugin/)).closest('[role="alert"]') as HTMLElement
   expect(notice).not.toBeNull()
   return { notice, row: notice.closest('li') as HTMLElement }
@@ -286,7 +286,7 @@ describe('RemoteCrewPanel refused AWS CLI', () => {
     vi.mocked(api.cloudPreflight).mockResolvedValue(cliRefused())
     const u = userEvent.setup()
     renderWithProviders(<RemoteCrewPanel />)
-    await u.click(await screen.findByRole('radio', { name: /Set up a new one/i }))
+    await u.click(await screen.findByRole('button', { name: 'Add Crew' })); await u.click(await screen.findByRole('button', { name: /Set up a new Crew/ }))
     const notice = (await screen.findByText(/^Your AWS credentials were not checked\. Found at \/opt\/homebrew\/bin\/aws, /)).closest('[role="alert"]') as HTMLElement
     expect(notice).toHaveTextContent(/belongs to another user account \(workbrew, user ID 502\)/)
     expect(within(notice).getByText('executable is owned by another user (uid 502)')).toBeInTheDocument()
@@ -342,7 +342,7 @@ describe('RemoteCrewPanel env-var AWS credentials', () => {
     vi.mocked(api.cloudPreflight).mockResolvedValue(preflight)
     const u = userEvent.setup()
     renderWithProviders(<RemoteCrewPanel />)
-    await u.click(await screen.findByRole('radio', { name: /Set up a new one/i }))
+    await u.click(await screen.findByRole('button', { name: 'Add Crew' })); await u.click(await screen.findByRole('button', { name: /Set up a new Crew/ }))
     return (await screen.findByText('AWS credentials')).closest('li') as HTMLElement
   }
 
