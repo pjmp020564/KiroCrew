@@ -194,7 +194,7 @@ const API_KEY_ORDER = [
   'getDecisionsConsent', 'getDecisionsProvider', 'getDecisionsLocalRuntime', 'saveDecisionsConsent', 'saveDecisionsScope',
   'saveDecisionsHistoryBudget', 'sendDecisionsFeedback', 'saveDecisionsProvider', 'saveDecisionsSageMaker', 'testDecisionsSageMaker', 'removeDecisionsLocalModel', 'getSlackConfig', 'getSlackManifest', 'getSlackManifestStatus', 'getSlackCodeChannelAgents', 'saveSlackConfig', 'reconnectSlack',
   'getDiscordConfig', 'saveDiscordConfig', 'getTelegramConfig', 'saveTelegramConfig',
-  'getWeComConfig', 'getFeishuConfig', 'saveFeishuConfig', 'saveWeComConfig',
+  'getWeComConfig', 'getFeishuConfig', 'saveFeishuConfig', 'installFeishuSdk', 'saveWeComConfig',
   'getWebexConfig', 'saveWebexConfig', 'getIMessageConfig', 'saveIMessageConfig',
   'getGovernanceChannels', 'getTeamsConfig', 'saveTeamsConfig', 'getWeixinConfig',
   'saveWeixinConfig', 'weixinQrStart', 'weixinQrStatus', 'getWhatsAppConfig',

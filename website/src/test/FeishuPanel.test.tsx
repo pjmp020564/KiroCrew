@@ -6,16 +6,19 @@ import { WeComPanel } from '../pages/settings/WeComPanel'
 import { SETTINGS_REGISTRY } from '../components/commandPalette/settingsRegistry.gen'
 import { scoreSettingEntry } from '../components/commandPalette/settingsSearchCore'
 import { i18nT } from '../i18n/t'
+import { toApiError } from '../api/apiError'
 
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   saveConfig: vi.fn(),
+  installSdk: vi.fn(),
 }))
 
 vi.mock('../api/client', () => ({
   api: {
     getFeishuConfig: mocks.getConfig,
     saveFeishuConfig: mocks.saveConfig,
+    installFeishuSdk: mocks.installSdk,
     // The last case renders WeComPanel to prove the group section is opt-in;
     // it reads the same mocks, so its own shape is set per test.
     getWeComConfig: mocks.getConfig,
@@ -264,6 +267,45 @@ describe('FeishuPanel missing-SDK card', () => {
     expect(
       screen.getByText('Then restart the gateway to start the Feishu channel.'),
     ).toBeInTheDocument()
+  })
+
+  it('after an in-app install, says it is installed and that a restart is due', async () => {
+    // The next read reports the SDK importable, but the running gateway loaded
+    // without it: the card must stay to say so instead of vanishing.
+    mocks.getConfig.mockResolvedValueOnce({
+      ...base, sdk_installed: false, sdk_install_supported: true, sdk_install_command: CMD, sdk_install_in_app: true,
+    })
+    mocks.getConfig.mockResolvedValue({
+      ...base, sdk_installed: true, sdk_install_supported: true, sdk_install_command: '', sdk_install_in_app: true,
+    })
+    mocks.installSdk.mockResolvedValue({ ok: true, restart_required: true })
+    renderPanel()
+    fireEvent.click(await screen.findByTestId('sdk-install-button'))
+    expect(await screen.findByTestId('sdk-installed-restart')).toHaveTextContent(
+      'Installed. Restart the gateway to start the Feishu channel.',
+    )
+    await waitFor(() => expect(mocks.getConfig).toHaveBeenCalledTimes(2))
+    expect(screen.getByTestId('sdk-installed-restart')).toBeInTheDocument()
+    expect(screen.queryByTestId('sdk-install-button')).not.toBeInTheDocument()
+  })
+
+  it('shows the gateway install failure in ErrorNotice without navigating away from drafts', async () => {
+    mocks.getConfig.mockResolvedValue({
+      ...base, sdk_installed: false, sdk_install_supported: true, sdk_install_command: CMD, sdk_install_in_app: true,
+    })
+    const message = 'The SDK installer could not write to its destination.'
+    mocks.installSdk.mockRejectedValue(await toApiError(new Response(
+      JSON.stringify({ error: message, code: 'sdk_install_failed' }),
+      { status: 502, headers: { 'Content-Type': 'application/json' } },
+    )))
+    renderPanel()
+    fireEvent.click(await screen.findByTestId('sdk-install-button'))
+    const notice = await screen.findByTestId('sdk-install-error')
+    expect(notice).toHaveAttribute('role', 'alert')
+    expect(notice).toHaveTextContent(message)
+    expect(screen.queryByRole('button', { name: /ask the agent/i })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('sdk-installed-restart')).not.toBeInTheDocument()
+    expect(screen.getByTestId('sdk-install-button')).toBeEnabled()
   })
 
   it('stays hidden once the SDK is importable', async () => {

@@ -572,6 +572,13 @@ BENIGN_PACKAGE_SPAWNS: frozenset[str] = frozenset(
         #     helper allowlist, never through argv; the children must reach the
         #     real browser and the loopback relay, so a sandbox would break them.
         "browser_harness/install.py::_run",
+        # ``sdk_extras.py::_lay_down`` (called by ``install_extra``) runs ``<sys.executable> -I -m
+        # pip install --target
+        # <data home>/extras/<extra>/.<tag>.partial --no-deps --require-hashes
+        # --only-binary :all: -r <shipped lock>``. Every token is a module constant, the
+        # shipped hash lock or a data-home path; the only caller is the owner's Install
+        # press (owner + local only), with a scrubbed PYTHON*/PIP_* env. Not agent-influenced.
+        "sdk_extras.py::_lay_down",
         "browser_harness/supervisor.py::_spawn",
         # The KAS engine installer (`kirocrew kas install`, operator terminal, outside
         # the sandbox). `_open_tar` runs the host's `zstd -d -c` on an archive whose

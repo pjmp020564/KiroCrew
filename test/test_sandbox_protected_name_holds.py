@@ -609,6 +609,9 @@ class TestLeafOnlyPopulationIsRecorded:
         "<crew>/denied_commands.json": (3, "standard cc strict"),
         "<crew>/diag": (3, "standard cc strict"),
         "<crew>/engines": (3, "standard cc strict"),
+        # The on-demand channel SDKs (sdk_extras.EXTRAS_LEAF): a data-home root leaf
+        # like engines, so no enclosing stand-in can hold it.
+        "<crew>/extras": (3, "standard cc strict"),
         "<crew>/gateway_id": (3, "standard cc strict"),
         "<crew>/host-exec-grants": (3, "standard cc strict"),
         "<crew>/import-staging": (3, "standard cc strict"),
