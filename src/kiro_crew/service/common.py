@@ -10,7 +10,7 @@ import stat
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 
 from kiro_crew.config import loader
 from kiro_crew.config.paths import CONFIG_DIR_NAME
@@ -138,6 +138,51 @@ def kirocrew_bin() -> str:
     if found:
         return through_stable_link(found)
     return through_stable_link(os.path.realpath(sys.argv[0]))
+
+
+def service_exec_path(bin_path: str) -> str:
+    """The program a service definition runs for *bin_path* (a
+    :func:`kirocrew_bin` result): the unit's ``ExecStart``, the launchd
+    launcher's ``exec`` target.
+
+    *bin_path* itself, except that a path in a Toolbox tool-version dir is named
+    through the Toolbox launcher (:func:`toolbox_launcher_for`), which runs
+    whatever version is current: Toolbox removes old version dirs on later
+    updates, and the service would then fail to start. ``KIROCREW_SERVICE_BIN``
+    is used as given at install. The service does not keep that variable, so a
+    later heal at gateway start (``macos._repoint_versioned_launcher``) still
+    replaces a target inside a managed-update version folder: the next update
+    removes that folder.
+
+    Only the program the manager starts moves. A path-attached AppArmor profile
+    and the SELinux context still read :func:`kirocrew_bin`, the script the
+    launcher ends up running: the launcher itself is a dispatcher every Toolbox
+    tool shares, so attaching a grant to it would grant every tool.
+    """
+    if os.environ.get("KIROCREW_SERVICE_BIN", "").strip():
+        return bin_path
+    return toolbox_launcher_for(bin_path) or bin_path
+
+
+def toolbox_launcher_for(path: str) -> str | None:
+    """The Toolbox launcher for *path* when it lies in a tool-version dir, else ``None``.
+
+    Toolbox installs each version under ``<home>/.toolbox/tools/<tool>/<version>/``
+    and puts one launcher per command in ``<home>/.toolbox/bin``. *path* is read
+    as given, not resolved, so the home spelling is kept. ``None`` also when that
+    launcher is not an executable file, so the caller keeps *path*.
+    """
+    parts = PurePath(path).parts
+    for i in range(len(parts) - 4):
+        if parts[i : i + 2] == (".toolbox", "tools"):
+            launcher = PurePath(*parts[:i], ".toolbox", "bin", parts[-1])
+            try:
+                if os.path.isfile(launcher) and os.access(launcher, os.X_OK):
+                    return str(launcher)
+            except (OSError, ValueError):
+                return None
+            return None
+    return None
 
 
 def _running_install_bin() -> str | None:

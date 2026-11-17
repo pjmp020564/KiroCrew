@@ -105,6 +105,44 @@ class TestKirocrewBinOverride:
         assert kirocrew_bin() == stable
         rewrite.assert_called_once_with(str(binary.resolve()))
 
+    @pytest.mark.parametrize("has_launcher", [True, False])
+    def test_toolbox_version_dir_is_started_through_the_toolbox_launcher(
+        self, has_launcher, monkeypatch, tmp_path
+    ):
+        """A Toolbox update removes old version dirs, so ExecStart names the launcher.
+
+        Without a launcher to point at, the running install's own path is kept.
+        ``kirocrew_bin`` keeps naming the script the launcher runs: a path-attached
+        AppArmor profile must never be attached to a dispatcher every tool shares.
+        """
+        from kiro_crew.service import linux as svc_linux
+
+        home = tmp_path / "home"
+        mine = self._console_script(
+            home / ".toolbox" / "tools" / "kirocrew" / "1.2.3" / "python3.12" / "bin"
+        )
+        launcher = home / ".toolbox" / "bin" / mine.name
+        if has_launcher:
+            self._console_script(launcher.parent)
+        monkeypatch.delenv("KIROCREW_SERVICE_BIN", raising=False)
+        monkeypatch.setenv("USER", "tester")
+        monkeypatch.setattr(common.sys, "executable", str(mine.parent / "python3"))
+
+        assert kirocrew_bin() == str(mine)
+        started = launcher if has_launcher else mine
+        assert (
+            f"ExecStart={svc_linux._sd_quote(str(started))} gateway --no-open\n"
+            in svc_linux.render_unit()
+        )
+
+    def test_service_bin_override_is_started_as_given_inside_toolbox(self, monkeypatch, tmp_path):
+        home = tmp_path / "home"
+        pinned = self._console_script(home / ".toolbox" / "tools" / "kirocrew" / "1.2.3" / "bin")
+        self._console_script(home / ".toolbox" / "bin")
+        monkeypatch.setenv("KIROCREW_SERVICE_BIN", str(pinned))
+
+        assert common.service_exec_path(kirocrew_bin()) == os.path.abspath(pinned)
+
     def test_service_bin_override_wins_over_which(self, monkeypatch):
         monkeypatch.setenv("KIROCREW_SERVICE_BIN", "/opt/wrapper/kirocrew")
         with patch(

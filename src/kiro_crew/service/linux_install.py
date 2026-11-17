@@ -436,8 +436,9 @@ def install_apparmor_profile(expected_uid: int | None) -> apparmor.ProfileOutcom
     NOT fatal: running without the profile is the status quo, while aborting
     an install over a hardening step is a regression.
 
-    Attaches the profile to ``kirocrew_bin()``, the path ``render_unit()`` uses
-    for ``ExecStart``, instead of ``AppArmorProfile=`` (see ``apparmor.py``).
+    Attaches the profile to ``kirocrew_bin()``, the script ``ExecStart`` runs
+    (directly, or through the Toolbox launcher ``service_exec_path`` names),
+    instead of ``AppArmorProfile=`` (see ``apparmor.py``).
 
     ``expected_uid`` is the uid of the account the SERVICE runs as, not the
     installer's (which may be root under ``sudo``). When it is ``None`` the
