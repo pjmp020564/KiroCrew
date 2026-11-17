@@ -354,9 +354,15 @@ def _prompt(
 
 
 async def handle_slash(
-    orch: Any, payload: dict[str, Any], respond: Callable[[str], Awaitable[None]]
+    orch: Any,
+    payload: dict[str, Any],
+    respond: Callable[[str], Awaitable[None]],
+    stop_seen: int | None = None,
 ) -> bool:
     """Handle a code-channel command; False when it is not one (normal routing runs).
+
+    *stop_seen* is the last code channel Stop the envelope's entry read
+    (``stop_hold.seen``): the command's person's stamp is built from it.
 
     Besides the channel's runtime commands, the app's own ``/kirocrew`` command
     is answered here for its ``agent`` and ``approval`` sub-commands
@@ -394,6 +400,7 @@ async def handle_slash(
         team=str(payload.get("team_id") or ""),
         text=text,
         respond=respond,
+        stop_seen=stop_seen,
     )
     return True
 
@@ -408,12 +415,14 @@ async def run_command(
     text: str,
     respond: Callable[[str], Awaitable[None]],
     via: str = "command",
+    stop_seen: int | None = None,
 ) -> None:
     """Every gate and effect of one channel command, after its de-duplication.
 
     The context bar's Create PR action (:mod:`.actions`) runs this same function
     with ``via="action"``, so a click is authorized, audited and delivered exactly
-    as ``/create-pr`` is.
+    as ``/create-pr`` is. *stop_seen*: the press the envelope's entry read
+    (``stop_hold.seen``), for the person's stamp; None carries none.
     """
     operation = "slack.code_channel.command"
     resources = f"channel={channel} command=/{command}" + (
@@ -470,6 +479,7 @@ async def run_command(
         channel_and_origin_permit,
         deliver_directed,
     )
+    from kiro_crew.slack.code_channels.stop_hold import stamp
     from kiro_crew.slack.handler import is_allowed_user
 
     if not is_allowed_user(user):
@@ -569,7 +579,8 @@ async def run_command(
         event = {"channel": channel, "team": binding.team_id}
         delivered = await deliver_directed(
             orch,
-            InboundResult(Gate.DIRECTED, binding=binding),
+            # ``is_allowed_user`` admitted the person above (``stop_hold``).
+            InboundResult(Gate.DIRECTED, binding=binding, stop_hold_stamp=stamp(stop_seen, True)),
             event,
             _prompt(command, user, text, worktree=target[0], branch=target[1], tag=tag, via=via),
             user,

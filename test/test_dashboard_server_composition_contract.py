@@ -475,6 +475,7 @@ _LAZY_IMPORTS = {
     "kiro_crew.security": "redact_credentials redact_exfiltration_urls",
     "kiro_crew.sel": "sel",
     "kiro_crew.slack.handler": "load_voice_reply_config",
+    "kiro_crew.slack.code_channels.stop_hold": "stop_hold_arrival_middleware",
     "kiro_crew.stt": "engine stt_models",
     "kiro_crew.shared_crew": "lifecycle",
     "kiro_crew.shared_crew.preview": "no_maintenance preview_enabled",
