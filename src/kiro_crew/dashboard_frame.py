@@ -76,6 +76,8 @@ import math
 import re
 from typing import Any, Final, Mapping, cast
 
+from kiro_crew.dashboard import dashboard_capture
+
 logger = logging.getLogger(__name__)
 
 #: The size ceiling for one template page, in bytes of UTF-8.
@@ -1117,6 +1119,79 @@ _BEACON_JS: Final[str] = f"""
 }})();
 """
 
+#: The host's request to read this page as it is drawn now: ``{type, nonce}``.
+CAPTURE_MESSAGE_TYPE: Final[str] = "kirocrew-dashboard:capture"
+#: The page's answer: ``{type, nonce, text, fields: [{label, value}], truncated}``.
+CAPTURED_MESSAGE_TYPE: Final[str] = "kirocrew-dashboard:captured"
+
+#: The caps, from the gateway's own so the frame cannot send more than it accepts.
+_CAPTURE_TEXT_MAX = dashboard_capture.TEXT_MAX_CHARS
+_CAPTURE_FIELDS_MAX = dashboard_capture.FIELDS_MAX
+_CAPTURE_LABEL_MAX = dashboard_capture.FIELD_LABEL_MAX
+_CAPTURE_VALUE_MAX = dashboard_capture.FIELD_VALUE_MAX
+
+#: THE LIVE CAPTURE (``dashboard_capture``), answered only when the HOST asks.
+#:
+#: The frame is an opaque origin, so the host cannot read its DOM; this script reads it
+#: from inside and posts the result to ``parent`` only, in answer to a message from
+#: ``parent`` carrying a nonce. It READS ONLY: ``innerText`` (what is rendered, not
+#: hidden nodes) and the values of form controls, never a password, hidden or file
+#: input. Every part is cut to the gateway's caps, and ``truncated`` says so. A page's
+#: own script can see the request and answer it too; the host takes the first answer
+#: with its nonce, and since the page is the Bot's own, a page that lies only misleads
+#: its own Bot.
+_CAPTURE_JS: Final[str] = f"""
+(function () {{
+  function cut(value, max) {{
+    var s = String(value == null ? '' : value);
+    return s.length > max ? s.slice(0, max) : s;
+  }}
+  function labelOf(el) {{
+    var aria = el.getAttribute('aria-label');
+    if (aria) return aria;
+    if (el.labels && el.labels.length) return el.labels[0].innerText;
+    return el.getAttribute('name') || el.getAttribute('placeholder') || el.id || '';
+  }}
+  function valueOf(el) {{
+    var tag = el.tagName.toLowerCase();
+    if (tag === 'select') {{
+      var picked = [];
+      for (var i = 0; i < el.options.length; i++) {{
+        if (el.options[i].selected) picked.push(el.options[i].text);
+      }}
+      return picked.join(', ');
+    }}
+    var type = (el.getAttribute('type') || '').toLowerCase();
+    if (type === 'checkbox' || type === 'radio') return el.checked ? 'checked' : 'unchecked';
+    return el.value;
+  }}
+  addEventListener('message', function (event) {{
+    if (event.source !== parent) return;
+    var data = event.data;
+    if (!data || data.type !== {CAPTURE_MESSAGE_TYPE!r} || typeof data.nonce !== 'string') return;
+    var text = document.body ? document.body.innerText : '';
+    var truncated = text.length > {_CAPTURE_TEXT_MAX};
+    var fields = [];
+    var controls = document.querySelectorAll('input, textarea, select');
+    for (var n = 0; n < controls.length; n++) {{
+      var el = controls[n];
+      var type = (el.getAttribute('type') || '').toLowerCase();
+      if (type === 'password' || type === 'hidden' || type === 'file') continue;
+      if (fields.length >= {_CAPTURE_FIELDS_MAX}) {{ truncated = true; break; }}
+      var label = labelOf(el), value = valueOf(el);
+      if (label.length > {_CAPTURE_LABEL_MAX} || value.length > {_CAPTURE_VALUE_MAX}) truncated = true;
+      fields.push({{
+        label: cut(label, {_CAPTURE_LABEL_MAX}), value: cut(value, {_CAPTURE_VALUE_MAX})
+      }});
+    }}
+    parent.postMessage({{
+      type: {CAPTURED_MESSAGE_TYPE!r}, nonce: data.nonce,
+      text: cut(text, {_CAPTURE_TEXT_MAX}), fields: fields, truncated: truncated
+    }}, '*');
+  }});
+}})();
+"""
+
 #: The frame's base styles. Type comes from three ROLE variables built only from CSS
 #: generic families, never a named typeface, so each system draws its own face:
 #: ``--font-sans`` (the default, for reading), ``--font-serif`` and ``--font-mono``
@@ -1276,6 +1351,9 @@ def compose(html: str, read: Mapping[str, Any], title: str = "") -> str:
         # BEFORE the page, so an error in the page's first script is counted.
         f"<script>{_INIT_GUARD_JS}</script>\n"
         f"<script>{_BOOTSTRAP_JS}</script>\n"
+        # Before the refill probe, so its own listener is not counted as the page
+        # handling refills, and before the page: only the host asks, by message.
+        f"<script>{_CAPTURE_JS}</script>\n"
         f"<script>{_REFILL_PROBE_JS}</script>\n"
         f"{html}\n"
         f"<script>{_BEACON_JS}</script>\n"

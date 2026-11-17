@@ -1672,6 +1672,25 @@ and versions are untouched, and nothing is kept between calls apart from that ca
 Granted without a prompt in `_MEMBER_PANEL_GRANTS`, on the same read test as
 `dashboard_fields`.
 
+**A Bot can read its own page from the person's open tab.** The `dashboard_capture`
+MCP tool (`mcp_panel_capture.py`, no arguments) asks
+`GET /api/agent-panel/dashboard/capture` (`handlers/agent_panel_capture.py`), which
+resolves the caller through the same gate and sends one owner-only
+`dashboard_capture` frame, `{request_id, slug}`, to the owner's sockets
+(`dashboard/dashboard_capture.py`, `CaptureHub`). Only a tab that is visible and shows
+that Bot's live page answers (`website/src/hooks/websocket/dashboardCapture.ts`): it
+shows a "Your Bot is reading this page" sign, asks its frame by message
+(`dashboard_frame._CAPTURE_JS`, answered only to `parent`), and posts the page's
+`innerText` and its form values (never a password, hidden or file input) to the
+owner-only `POST /api/members/{slug}/dashboard/capture`. That route accepts a reply
+only for the request pending for that slug, at most `TEXT_MAX_CHARS` (16,000) of text
+and `FIELDS_MAX` (64) values of `FIELD_VALUE_MAX` (500) characters, refused whole when
+larger; the first valid reply wins and a later one is refused, so tabs are never
+merged. No tab, only hidden tabs, or no reply in `CAPTURE_WAIT_SECONDS` answers
+`not_captured` with `no_tab`; a page served without script answers `unavailable`. The
+whole answer crosses `kirocrew-panel`'s redaction pass. Nothing is written or kept.
+Granted without a prompt in `_MEMBER_PANEL_GRANTS`, on the same read test.
+
 The MCP text preserves the catalog's `row_keys`, `names_the_row`, `row_note`
 and `nested_rows` beside each path. Nested rows are script-readable metadata,
 not new dotted index paths. Each nested group is bracketed and retains its
