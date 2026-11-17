@@ -18,6 +18,10 @@ What the body can and cannot say:
 * The operation is kept under the app's own namespace (``<app>.<operation>``), so
   an app cannot reuse a gateway operation name such as ``internal_auth``.
 * ``source`` is ``app``, so a reader shows the row as app-sourced.
+* An operation is ``[A-Za-z0-9_.-]``, 1 to 64 characters, so no newline or control
+  character reaches a stored row. A tool use is the ordinary row with the operation
+  ``tool.<name>``. ``critical`` stays a flag on that one row (it makes ``sel.py``'s
+  write synchronous; nothing else reacts to it).
 
 Responses never echo the body. A refused write is a status code and a fixed string.
 
@@ -30,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -43,9 +48,10 @@ logger = logging.getLogger(__name__)
 #: ``resources`` and ``error`` to 500 characters (``sel.py:111``) but stores
 #: ``operation`` as given, so ``operation`` is capped here instead.
 _MAX_BODY = 16 * 1024
-#: Longest ``operation`` accepted, before the ``<app>.`` prefix (an app name is at most
-#: 64 characters, so the stored value stays under the shared 500-character clip).
-_MAX_OPERATION = 200
+#: An ``operation``, before the ``<app>.`` prefix: letters, digits and ``_ . -`` and at
+#: most 64 characters (an app name is at most 64 too, so the stored value stays under the
+#: shared 500-character clip). No space or control character can reach a stored row.
+_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 #: Sustained rows per second and burst, per app. A refused call never reaches the
 #: log, so the limiter cannot grow or rotate the segment.
 _RATE = 50.0
@@ -100,7 +106,7 @@ def _parse(raw: bytes) -> tuple[str, dict[str, Any]] | None:
     for key, value in kwargs.items():
         if not isinstance(value, bool if key == "critical" else str):
             return None
-    if len(kwargs["operation"]) > _MAX_OPERATION:
+    if not _NAME.fullmatch(kwargs["operation"]):
         return None
     return method, kwargs
 
