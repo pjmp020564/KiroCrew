@@ -76,7 +76,13 @@ async def test_the_write_gate_goes_to_both_real_providers_and_admits_a_release()
     from kiro_crew.acp.session_provider import AcpSessionProvider
 
     slot = _slot("chat-h-2")
-    assert stop_hold.write_gate(object(), slot, "") == {}, "a client without the keyword"
+
+    class Plain:
+        async def stream(self, message: str, timeout: float | None = None) -> Any:
+            yield message
+
+    assert stop_hold.write_gate(object(), slot, "") == {}, "a client without a stream"
+    assert stop_hold.write_gate(Plain(), slot, "") == {}, "a stream without the keyword"
     shared = stop_hold.write_gate(object.__new__(AcpSessionProvider), slot, "")
     shared["prompt_gate"]()  # free: nothing raised
     _press(slot)
@@ -97,11 +103,14 @@ async def test_a_turn_held_at_the_write_ends_quietly_as_stopped() -> None:
     assert record.stop_reason == "failed: channel_stopped"
 
 
+@pytest.mark.parametrize("windows", [False, True], ids=["posix", "windows"])
 async def test_a_hook_command_never_spawns_once_the_stop_lands(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, windows: bool
 ) -> None:
     """r9 GPT B: a hook's vetting awaits (governance, the deny list, the sandbox argv).
-    A Stop at any of them spawns no command: the ask is after the last await."""
+    A Stop at any of them spawns no command: the ask is after the last await. On either
+    platform's shell (an unwrapped Windows argv spawns through the shell, so the sandbox
+    here wraps it and every spawn reaches the patched one)."""
     from test_slack_code_channel_stop_hold import _stepped
 
     import kiro_crew.hook_event_governance as governance
@@ -116,8 +125,9 @@ async def test_a_hook_command_never_spawns_once_the_stop_lands(
         spawned.append(stopped[0])
         raise OSError("not spawned in this test")
 
+    monkeypatch.setattr(hooks.platform_compat, "IS_WINDOWS", windows)
     monkeypatch.setattr(sandbox, "create_subprocess_limited", spawn)
-    monkeypatch.setattr(sandbox, "wrap_argv", lambda argv, **k: (list(argv), None))
+    monkeypatch.setattr(sandbox, "wrap_argv", lambda argv, **k: (["sandbox", *argv], None))
     monkeypatch.setattr(sandbox, "cgroup_scope_argv", lambda argv: list(argv))
     monkeypatch.setattr("kiro_crew.hooks._script_hooks_capability_denied", lambda _sk: None)
     monkeypatch.setattr(governance, "event_refusal", lambda *_a: None)
