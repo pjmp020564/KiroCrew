@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from chat_test_helpers import _make_state
 
-from kiro_crew import mcp_dashboard
+from kiro_crew import ledger_wake, mcp_dashboard
 from kiro_crew.crew_log import emit
 from kiro_crew.crew_log import session_tree_projection as stp
 from kiro_crew.crew_log.session_tree import OpenedRecord
@@ -147,6 +147,109 @@ class TestLiveness:
         _busy(_child(state, "chat-2", caller))
         row = _rows(_status(state, caller))["chat-2"]
         assert row["status"] == "working" and row["running"] is True
+        assert row["turn_running"] is True
+        assert row["activity"] == ["turn"]
+
+    def test_turn_admission_is_not_reported_as_a_running_turn(self, tmp_path):
+        state = _make_state(tmp_path)
+        caller = _slot(state, "chat-1")
+        child = _child(state, "chat-2", caller)
+        child._turn_admission_reserved = True
+        row = _rows(_status(state, caller))["chat-2"]
+        assert row["status"] == "working"
+        assert row["running"] is True
+        assert row["turn_running"] is False
+        assert row["activity"] == ["admission"]
+
+    def test_an_idle_session_with_running_subagents_is_working(self, tmp_path):
+        state = _make_state(tmp_path)
+        caller = _slot(state, "chat-1")
+        child = _child(state, "chat-2", caller)
+        child_key = _key(child)
+        state.subagents = SimpleNamespace(
+            running_agents_for=lambda key: [{"id": "sa-1"}] if key == child_key else [],
+            has_in_memory_pending_work_for=lambda _key: False,
+            published_queued_depths=lambda: {},
+        )
+        row = _rows(_status(state, caller))["chat-2"]
+        assert row["status"] == "working"
+        assert row["running"] is True
+        assert row["turn_running"] is False
+        assert row["activity"] == ["subagents"]
+
+    def test_an_idle_session_with_queued_subagents_is_queued(self, tmp_path):
+        state = _make_state(tmp_path)
+        caller = _slot(state, "chat-1")
+        child = _child(state, "chat-2", caller)
+        child_key = _key(child)
+        state.subagents = SimpleNamespace(
+            running_agents_for=lambda _key: [],
+            has_in_memory_pending_work_for=lambda _key: False,
+            published_queued_depths=lambda: {child_key: 2},
+        )
+        row = _rows(_status(state, caller))["chat-2"]
+        assert row["status"] == "queued"
+        assert row["running"] is False
+        assert row["activity"] == ["subagents_queued"]
+
+    def test_an_unreadable_background_probe_is_named_unknown(self, tmp_path):
+        state = _make_state(tmp_path)
+        caller = _slot(state, "chat-1")
+        _child(state, "chat-2", caller)
+
+        def unreadable(_key):
+            raise RuntimeError("unreadable")
+
+        state.subagents = SimpleNamespace(running_agents_for=unreadable)
+        row = _rows(_status(state, caller))["chat-2"]
+        assert row["status"] == "working"
+        assert row["running"] is True
+        assert row["turn_running"] is False
+        assert row["activity"] == ["unknown"]
+
+    def test_an_idle_session_with_a_running_workflow_is_working(self, tmp_path):
+        state = _make_state(tmp_path)
+        caller = _slot(state, "chat-1")
+        child = _child(state, "chat-2", caller)
+        child_key = _key(child)
+        state.workflow_service = SimpleNamespace(
+            registry=SimpleNamespace(has_pending_work_for=lambda key: key == child_key)
+        )
+        row = _rows(_status(state, caller))["chat-2"]
+        assert row["status"] == "working"
+        assert row["running"] is True
+        assert row["turn_running"] is False
+        assert row["activity"] == ["workflow"]
+
+    @pytest.mark.parametrize(
+        ("field", "kind"),
+        [
+            ("_preparing_count", "preparing"),
+            ("_compacting", "compaction"),
+            ("_pending_synthesis", "synthesis"),
+        ],
+    )
+    def test_background_session_work_is_named(self, tmp_path, field, kind):
+        state = _make_state(tmp_path)
+        caller = _slot(state, "chat-1")
+        child = _child(state, "chat-2", caller)
+        setattr(child, field, 1 if field == "_preparing_count" else True)
+        row = _rows(_status(state, caller))["chat-2"]
+        assert row["status"] == "working"
+        assert row["running"] is True
+        assert row["turn_running"] is False
+        assert row["activity"] == [kind]
+
+    def test_an_active_automation_is_named_between_checks(self, tmp_path, monkeypatch):
+        state = _make_state(tmp_path)
+        caller = _slot(state, "chat-1")
+        _child(state, "chat-2", caller)
+        monkeypatch.setattr(ledger_wake, "worker_looping", lambda _svc, key: key == "chat-2")
+        row = _rows(_status(state, caller))["chat-2"]
+        assert row["status"] == "idle"
+        assert row["running"] is False
+        assert row["looping"] is True
+        assert row["activity"] == ["automation"]
 
     def test_an_idle_session_with_messages_waiting_is_queued(self, tmp_path):
         """Distinct from `idle` because a steer would land on nothing, and distinct

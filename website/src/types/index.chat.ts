@@ -941,6 +941,10 @@ export interface CrewWorker {
   /** The side panel's group: a tool approval only the person can give, moving,
    *  waiting on its conductor, not started, finished. */
   group: 'approval' | 'working' | 'with_conductor' | 'waiting' | 'done'
+  /** Current session-owned work. Absent on an older gateway. */
+  activity?: ('turn' | 'admission' | 'subagents' | 'subagents_queued' | 'workflow' | 'synthesis' | 'preparing' | 'compaction' | 'automation' | 'unknown')[]
+  /** The narrower model-turn flag. Absent on an older gateway. */
+  turn_running?: boolean
   /** ISO time of the worker's last turn or message; "" when it has none yet. */
   last_activity: string
   /** The work-ledger item the worker is bound to, or "" when it is not bound. */

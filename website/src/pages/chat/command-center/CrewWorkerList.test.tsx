@@ -443,6 +443,24 @@ describe('Conductor mode Crew tab', () => {
     expect(screen.getByTestId('conductor-mode-needs-you-none')).toHaveTextContent('Quiet or stuck work is under Milestones.')
   })
 
+  it('Status: a stale milestone stays running while its worker has sub-agents', async () => {
+    api.crewWorkers.mockResolvedValue({
+      ...WORKERS,
+      workers: [{ ...W('w-subagents', 'People cards worker', 'idle', 'waiting'), ledger_item: 'q1' }],
+    })
+    api.crewBoard.mockResolvedValue({ ...BOARD, items: [
+      ITEM({ item_id: 'q1', title: 'People cards', stale: true, alive: 'idle', summary: 'Helpers are still running.' }),
+    ] })
+    renderWith(<ConductorModeCrewPanel root="root-1" viewing="root-1" active />, [
+      { key: 'w-subagents', title: 'People cards worker', crew_root: 'root-1', created_by: 'root-1', subagents_running: true },
+    ])
+    const row = await screen.findByTestId('conductor-mode-milestone')
+    expect(row).toHaveAttribute('data-state', 'running')
+    expect(screen.getByTestId('conductor-mode-pulse')).toHaveTextContent(/moving/i)
+    expect(screen.getByTestId('conductor-mode-recap')).toHaveTextContent('1 running')
+    expect(screen.getByTestId('conductor-mode-needs-you-none')).toHaveTextContent('Nothing needs you right now.')
+  })
+
   it('Status: an idle milestone whose worker loops on CI reads running and names its PR', async () => {
     api.crewWorkers.mockResolvedValue(WORKERS)
     api.crewBoard.mockResolvedValue({ ...BOARD, items: [

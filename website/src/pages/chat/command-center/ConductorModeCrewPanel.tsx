@@ -297,21 +297,22 @@ export function reportAnswered(item: WorkBoardItem): boolean {
   return events.some(e => (e.kind === 'decision' || e.kind === 'steer') && atOrAfterReport(e.ts))
 }
 
-export function milestoneState(item: WorkBoardItem, waiting: boolean): MilestoneState {
+export function milestoneState(item: WorkBoardItem, waiting: boolean, workerWorking = false): MilestoneState {
   // A closed item is finished whatever its last report said: done when
   // accepted, not done when rejected or abandoned. Then the person; then a
   // session working again reads as running even after an earlier "done"
-  // report. A report counts only until the conductor decides on it
-  // (`decided_at` at or after the report hands it back).
+  // report. The crew row also knows about session-owned work that outlives
+  // the worker's own turn and therefore is absent from `item.alive`.
   if (item.state === 'accepted') return 'done'
   if (item.terminal) return 'not_done'
   const open = item.status === 'progress' || item.status === 'blocked' || item.status === 'question'
+  const running = item.alive === 'running' || workerWorking
   // Needs you only when the person must act: a pending approval of the item's
   // member (`waiting`), or an unanswered blocked / question report whose reason
   // names a person. An answer -- the conductor's or the person's own steer, a
-  // dismiss included -- ends it, and so does a turn running again (the worker moved on).
-  if (waiting || ((item.status === 'blocked' || item.status === 'question') && PERSON_REASONS.has(item.reason || '') && !reportAnswered(item) && item.alive !== 'running')) return 'needs_you'
-  if (item.alive === 'running') return 'running'
+  // dismiss included -- ends it, and so does live work (the worker moved on).
+  if (waiting || ((item.status === 'blocked' || item.status === 'question') && PERSON_REASONS.has(item.reason || '') && !reportAnswered(item) && !running)) return 'needs_you'
+  if (running) return 'running'
   // Stuck only when nothing is left to move it: its session closed on an open
   // report, or the board is orphaned (no main chat reads its reports). A done
   // report or an unstarted item keeps its own state even on an orphaned board.
@@ -635,6 +636,7 @@ export default function ConductorModeCrewPanel({ root, viewing, active, onAct }:
   const crewModeOn = useCrewMode()
   const pause = crewModeOn ? listed.data?.paused : undefined
   const slots = useAppSelector(s => s.dashboard.slots)
+  const now = Date.now()
   const approvals = crewApprovalRequests(slots, root, new Map())
   // The same pending-question record the chat's own card reads.
   const pendingQuestion = useAppSelector(st => pendingQuestionFor(st.chat.pendingQuestions, root))
@@ -718,7 +720,6 @@ export default function ConductorModeCrewPanel({ root, viewing, active, onAct }:
   const scope = goalScope(goalText)
   // The raw goal: its Changed entries may be one per line, which collapsing would lose.
   const changed = latestChange(board.data?.conductor?.goal || '')
-  const now = Date.now()
   // Which ledger item each pending approval belongs to: the crew list's own join.
   const approvalByItem = new Map<string, string>()
   for (const a of approvals) {
@@ -734,7 +735,13 @@ export default function ConductorModeCrewPanel({ root, viewing, active, onAct }:
   const replyInto = !viewing || viewing === root ? onAct : undefined
   const crewBack = useCrewBack(root)
   const milestones = items.map(item => {
-    const state = milestoneState(item, approvalByItem.has(item.item_id))
+    const worker = workers.find(w => w.ledger_item === item.item_id)
+    const liveWorker = worker ? slots.find(slot => slot.key === worker.key) : undefined
+    // The board's `alive` covers every server-owned activity kind. The live
+    // slot keeps turn, sub-agent, preparation and compaction changes immediate.
+    const workerWorking = worker?.group === 'working' || !!liveWorker
+      && !!(liveWorker.running || liveWorker.subagents_running || liveWorker.preparing || liveWorker.compacting)
+    const state = milestoneState(item, approvalByItem.has(item.item_id), workerWorking)
     const waitingOn = approvalByItem.get(item.item_id) || firstSentence(item.summary) || i18nT('components.crewMode.conductor_mode_needs_you')
     return { item, state, waitingOn }
   })
@@ -762,7 +769,8 @@ export default function ConductorModeCrewPanel({ root, viewing, active, onAct }:
   const rootSlot = slots.find(s => s.key === root)
   const runState = conductorModeRunState({
     paused: !!pause, needsYou: needCount > 0 || !!rootSlot?.pending_approval, hasGoal: !!goalText, items: items.length, run: board.data?.run,
-    working: moving || c.running > 0 || !!rootSlot?.running,
+    working: moving || c.running > 0 || !!board.data?.conductor_working
+      || !!rootSlot?.running || !!rootSlot?.subagents_running || !!rootSlot?.preparing || !!rootSlot?.compacting,
   })
   const openItem = (item: WorkBoardItem) => {
     const w = workers.find(x => x.ledger_item === item.item_id)

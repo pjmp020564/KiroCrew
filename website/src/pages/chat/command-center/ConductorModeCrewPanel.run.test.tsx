@@ -6,7 +6,7 @@
  * Not done, never with the done check.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Provider } from 'react-redux'
 import { createTestStore } from '../../../test/helpers'
@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({ crewWorkers: vi.fn(), resumeChatSlot: vi.fn(), c
 vi.mock('../../../api/client', () => ({ api }))
 vi.mock('../../../hooks/usePanelTabs', () => ({ openPanelView: vi.fn() }))
 
+import { sseWorkflowEvent } from '../../../store/chatSlice'
 import ConductorModeCrewPanel from './ConductorModeCrewPanel'
 import type { WorkBoardItem } from '../../../api/crewBoard'
 import type { ConductorModeRun } from '../../../types'
@@ -34,6 +35,7 @@ function renderPanel(viewing = 'root-1', slots: unknown[] = []) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const store = createTestStore({ dashboard: { slots } } as never)
   render(<QueryClientProvider client={qc}><Provider store={store}><ConductorModeCrewPanel root="root-1" viewing={viewing} active /></Provider></QueryClientProvider>)
+  return store
 }
 
 async function runLine() {
@@ -106,6 +108,48 @@ describe('Conductor mode run line', () => {
     const line = await runLine()
     expect(line).toHaveAttribute('data-state', 'working')
     expect(within(line).queryByTestId('conductor-mode-run-detail')).toBeNull()
+  })
+
+  it('says Working while the root has active sub-agents', async () => {
+    const open = ITEM({ state: 'open', status: 'progress', terminal: false, alive: 'idle', closed_at: null })
+    api.crewBoard.mockResolvedValue({ ...BOARD, items: [open], run: RUN({ settled: 'stopped', open: 1, accepted: 0 }) })
+    renderPanel('root-1', [{ key: 'root-1', title: 'Main', subagents_running: true }])
+    expect(await runLine()).toHaveAttribute('data-state', 'working')
+  })
+
+  it('says Working while the root owns a workflow', async () => {
+    const open = ITEM({ state: 'open', status: 'progress', terminal: false, alive: 'idle', closed_at: null })
+    const stopped = { ...BOARD, items: [open], run: RUN({ settled: 'stopped', open: 1, accepted: 0 }) }
+    api.crewBoard.mockResolvedValueOnce(stopped).mockResolvedValue({ ...stopped, conductor_working: true, conductor_activity: ['workflow'] })
+    const store = renderPanel('root-1', [{ key: 'root-1', title: 'Main' }])
+    expect(await runLine()).toHaveAttribute('data-state', 'stopped')
+    act(() => { store.dispatch(sseWorkflowEvent({ run_id: 'wf-root', session_key: 'root-1', type: 'run_started', data: { name: 'Review' } })) })
+    await waitFor(() => expect(screen.getByTestId('conductor-mode-run')).toHaveAttribute('data-state', 'working'))
+  })
+
+  it('keeps a stale milestone running while its worker owns a workflow', async () => {
+    const open = ITEM({ item_id: 'it_wf', state: 'open', status: 'progress', terminal: false, stale: true, alive: 'idle', closed_at: null })
+    const waitingWorker = {
+      root: 'root-1',
+      workers: [{
+        key: 'worker-1', title: 'Worker', agent: 'kirocrew-worker', status: 'idle', group: 'waiting',
+        last_activity: '', ledger_item: 'it_wf', created_by: 'root-1',
+      }],
+    }
+    api.crewWorkers.mockResolvedValueOnce(waitingWorker).mockResolvedValue({
+      ...waitingWorker,
+      workers: [{ ...waitingWorker.workers[0], status: 'working', group: 'working', activity: ['workflow'] }],
+    })
+    const quiet = { ...BOARD, items: [open], run: RUN({ settled: 'stopped', open: 1, accepted: 0 }) }
+    api.crewBoard.mockResolvedValueOnce(quiet).mockResolvedValue({
+      ...quiet,
+      items: [{ ...open, alive: 'running', stale: false }],
+    })
+    const store = renderPanel('root-1', [{ key: 'worker-1', title: 'Worker', crew_root: 'root-1', created_by: 'root-1' }])
+    await waitFor(() => expect(screen.getByTestId('conductor-mode-milestone')).toHaveAttribute('data-state', 'quiet'))
+    act(() => { store.dispatch(sseWorkflowEvent({ run_id: 'wf-worker', session_key: 'worker-1', type: 'run_started', data: { name: 'Review' } })) })
+    await waitFor(() => expect(screen.getByTestId('conductor-mode-milestone')).toHaveAttribute('data-state', 'running'))
+    expect(screen.getByTestId('conductor-mode-recap')).toHaveTextContent('1 running')
   })
 
   it('says Waiting for you over a settled verdict when an item asks the person', async () => {

@@ -265,8 +265,14 @@ less than `_RACY_SECS` (2 s) after the folders last changed, or that could not r
 every item file or got an empty event tail for an open item, or listed no item, or
 joined a listing already in flight when it began, is not kept, and kept
 reads have the same budgets as the store listing memo (256 boards, 10,000 items). Staleness,
-liveness and undelivered reports are judged on every tick, served read or not.
-`test_work_ledger_watch_board_reads.py` pins it.
+liveness and undelivered reports are judged on every tick, served read or not. The
+gateway's `worker_running` binding reads the same session-activity snapshot as the
+Board and `work_ledger_read`: a turn, workflow, running sub-agent, synthesis,
+preparation or compaction suppresses a false stall, and queued sub-agents suppress
+staleness while remaining queued. An unreadable activity probe suppresses nothing,
+and background work never clears a `needs_human` report; only a new model turn does.
+`test_gateway_nudge_wiring.py`, `test_crew_board_needs_you_dismiss.py`, and
+`test_work_ledger_watch_board_reads.py` pin both sides.
 
 A delivered work-ledger wake is a POINTER, not a copy of the board.
 `ledger_wake.wake_turn_text` prefixes the nudge with the kernel's structural briefs

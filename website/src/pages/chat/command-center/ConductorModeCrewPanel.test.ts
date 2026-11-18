@@ -134,6 +134,11 @@ describe('milestoneState', () => {
     expect(milestoneState(item({ status: 'progress', ...R }), false)).toBe('waiting')
   })
 
+  it('running: active sub-agents keep an idle, stale worker moving', () => {
+    expect(milestoneState(item({ status: 'progress', stale: true, ...R }), false, true)).toBe('running')
+    expect(milestoneState(item({ status: 'blocked', reason: 'needs_human', stale: true, ...R }), false, true)).toBe('running')
+  })
+
   it('running: an idle worker whose own loop will wake it (waiting on CI)', () => {
     expect(milestoneState(item({ status: 'progress', looping: true, ...R }), false)).toBe('running')
     // A report the conductor still owes an answer, or one on the person, keeps its state.
