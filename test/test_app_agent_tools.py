@@ -260,6 +260,40 @@ def test_an_installed_declaration_is_read_and_follows_an_edit():
     ]
 
 
+def test_a_chat_row_for_an_app_tool_reads_its_manifest_title(monkeypatch):
+    """The tool row in chat shows the title the manifest gives the tool, as its label.
+
+    The lookup reads manifests, so the turn runs it off the loop
+    (``refresh_row_title``) and the row builders read only what it kept.
+    """
+    from types import SimpleNamespace
+
+    from kiro_crew.dashboard.chat_utils import _row_purpose
+
+    _install(block=_block(_tool(), _tool(name="fake_app_bare", title="")))
+
+    def _call(name: str, purpose: str = "", server: str = "kirocrew-core") -> Any:
+        return SimpleNamespace(tool_purpose=purpose, tool_name=name, mcp_server_name=server)
+
+    monkeypatch.setattr(app_agent_tools, "_row_titles", {})
+    assert _row_purpose(_call("fake_app_note")) == "", "nothing read yet"
+    assert app_agent_tools.refresh_row_title("kirocrew-core", "fake_app_note") == "Post a note"
+    assert app_agent_tools.refresh_row_title("kirocrew-core", "fake_app_bare") == ""
+
+    def _no_scan() -> Any:
+        raise AssertionError("a row builder scanned the app manifests")
+
+    with monkeypatch.context() as mp:
+        mp.setattr(app_agent_tools, "declared_tools", _no_scan)
+        assert _row_purpose(_call("fake_app_note")) == "Post a note"
+        # The agent's own purpose wins; a tool with no title, another server's tool
+        # of the same name, and a core tool keep what they had.
+        assert _row_purpose(_call("fake_app_note", purpose="Note it")) == "Note it"
+        assert _row_purpose(_call("fake_app_bare")) == ""
+        assert _row_purpose(_call("fake_app_note", server="someone-else")) == ""
+    assert app_agent_tools.tool_row_title("kirocrew-core", "session_send") == ""
+
+
 def test_a_third_party_app_lists_nothing(first_party):
     """``kirocrew-core`` is auto-approved as a whole server: a third-party tool never joins it."""
     first_party["all"] = False

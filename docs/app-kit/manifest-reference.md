@@ -282,7 +282,7 @@ own (`mcpServers`); the user approves each of its calls.
 | `namespace` | string | Optional. The prefix your tool names use instead of the app name: a lowercase identifier of at most 32 characters (`pod`: `pod_...`) |
 | `tools[].name` | string | A lowercase identifier (`[a-z][a-z0-9_]{0,63}`) that must begin with your namespace, or by default your app's name with `-` read as `_`, then `_` (app `my-app`: `my_app_...`). A name a built-in core tool already has is never yours |
 | `tools[].description` | string | What the model reads, up to 4,000 characters |
-| `tools[].title` | string | Optional one-line display title, up to 80 characters |
+| `tools[].title` | string | Optional one-line display title, up to 80 characters. A chat row for a call of the tool shows it as its label, unless the agent wrote its own |
 | `tools[].inputSchema` | object | An object schema of at most 32 arguments using only `string` (`enum`, `maxLength`), `integer` and `number` (`minimum`, `maximum`), `boolean`, and arrays of strings or integers (`maxItems`, item `maxLength`). A string with no `maxLength` is capped at 65,536 characters and an array with no `maxItems` at 256 items; a bool is refused where an integer is declared; `additionalProperties` may only be `false` |
 | `tools[].maxResultChars` | number | Where your answer is cut after redaction, 1 to 60,000; default 20,000 |
 | `tools[].timeoutSeconds` | integer | How long the core waits for your answer, 1 to 600; default 30 |

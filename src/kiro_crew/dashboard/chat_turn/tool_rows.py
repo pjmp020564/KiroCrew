@@ -10,7 +10,9 @@ from typing import TYPE_CHECKING, Any
 
 from kiro_crew import redaction_seams
 from kiro_crew.agent_sdk.spec_hooks import post_tool_identity
+from kiro_crew.apps.app_agent_tools import LISTING_SERVER, refresh_row_title
 from kiro_crew.dashboard.chat_utils import (
+    _row_purpose,
     _tool_identity_fields,
     open_construct_at_end,
     restore_replacement_if_handover_did_not_land,
@@ -184,7 +186,7 @@ def _tool_meta(event: "LLMEvent") -> dict[str, str] | None:
         return None
     return {
         "tool_call_id": _redact_tool_field(event.tool_call_id),
-        "purpose": _redact_tool_field(event.tool_purpose, limit=_MAX_TOOL_PURPOSE),
+        "purpose": _row_purpose(event),
         "input": _redact_tool_field(event.tool_input),
         # ACP tool kind (read/edit/execute/…). The dashboard gates the inline
         # diff-card promotion on kind == "edit" so a shell command whose input
@@ -257,7 +259,7 @@ def _tool_call_ws_payload(event: "LLMEvent") -> dict[str, str | bool]:
         "kind": kind,
         "is_shell": event.is_shell,
         "tool_call_id": _redact_tool_field(event.tool_call_id),
-        "purpose": _redact_tool_field(event.tool_purpose, limit=_MAX_TOOL_PURPOSE),
+        "purpose": _row_purpose(event),
         "input_preview": _redact_tool_field(event.tool_input),
         **_tool_identity_fields(event),
     }
@@ -320,6 +322,10 @@ async def _on_tool_call(turn: _ChatTurn, event) -> None:
     state = turn.state
     _turn_tool_calls += 1
     turn._turn_tool_calls = _turn_tool_calls
+    if not event.tool_purpose and getattr(event, "mcp_server_name", "") == LISTING_SERVER:
+        # An app tool's manifest title is the row's label; its lookup reads the app
+        # manifests, so it runs off the loop and the row builders read the cache.
+        await asyncio.to_thread(refresh_row_title, event.mcp_server_name, event.tool_name)
     _repeat_loop.note_call(event.tool_call_id, event.tool_name or "", event.tool_input, event.title)
     if turn._terminal_directive_applied:
         _activity_after_terminal += 1

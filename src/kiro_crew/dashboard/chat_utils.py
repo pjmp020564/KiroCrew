@@ -424,6 +424,21 @@ def _tool_identity_fields(event: "LLMEvent") -> dict[str, str]:
     return out
 
 
+def _row_purpose(event: "LLMEvent") -> str:
+    """The prose label a tool row shows (redacted): the agent's own purpose, else the
+    ``title`` an app's manifest gives the tool it called, as the turn's tool-call arm
+    last read it off the loop (``app_agent_tools.cached_row_title``), so an app tool's
+    row reads as the app named it, not as the tool's identifier. Memory only."""
+    purpose = getattr(event, "tool_purpose", "") or ""
+    if not purpose:
+        from kiro_crew.apps.app_agent_tools import cached_row_title
+
+        purpose = cached_row_title(
+            getattr(event, "mcp_server_name", ""), getattr(event, "tool_name", "")
+        )
+    return _redact_tool_field(purpose, limit=_MAX_TOOL_PURPOSE)
+
+
 def _broadcast_auto_tool(state: DashboardState, slot: _ChatSlot, event: "LLMEvent") -> str:
     """Broadcast an auto-approved tool call via WS with redacted title. Returns redacted title."""
     from kiro_crew.security import redact
@@ -443,7 +458,7 @@ def _broadcast_auto_tool(state: DashboardState, slot: _ChatSlot, event: "LLMEven
             "kind": kind,
             "auto": True,
             "tool_call_id": tcid,
-            "purpose": _redact_tool_field(event.tool_purpose, limit=_MAX_TOOL_PURPOSE),
+            "purpose": _row_purpose(event),
             "input_preview": _redact_tool_field(event.tool_input),
             **_tool_identity_fields(event),
         },

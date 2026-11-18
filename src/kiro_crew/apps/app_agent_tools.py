@@ -284,6 +284,55 @@ def declared_tool(name: str) -> DeclaredTool | None:
     return None
 
 
+#: The MCP server an app's declared tools are listed under (``mcp_tools/app_tools.py``).
+LISTING_SERVER = "kirocrew-core"
+
+
+def tool_row_title(server: Any, name: Any) -> str:
+    """The manifest ``title`` a chat row shows for a call of an app tool, or ``""``.
+
+    *server* and *name* are the call's trusted identity (``_meta.kiro``). Only a tool
+    listed under :data:`LISTING_SERVER` that no core tool's own title covers counts:
+    a core tool keeps its declared title. Never raises; an unreadable scan is ``""``.
+    """
+    if server != LISTING_SERVER or not isinstance(name, str) or not name:
+        return ""
+    try:
+        from kiro_crew.mcp_tool_titles import declared_tool_title
+
+        if declared_tool_title(LISTING_SERVER, name):
+            return ""
+        tool = declared_tool(name)
+    except Exception:  # noqa: BLE001 - a row title never fails the row
+        logger.debug("app tool title lookup failed for %s", name, exc_info=True)
+        return ""
+    return tool.decl.title if tool is not None else ""
+
+
+#: The manifest titles :func:`refresh_row_title` last read, by tool name. Read on the
+#: event loop by :func:`cached_row_title`; written off it. Holds only declared tools
+#: that have a title, at most 16 per app.
+_row_titles: dict[str, str] = {}
+
+
+def refresh_row_title(server: Any, name: Any) -> str:
+    """:func:`tool_row_title`, kept for :func:`cached_row_title`. Blocking: run it off the loop."""
+    title = tool_row_title(server, name)
+    if isinstance(name, str):
+        if title:
+            _row_titles[name] = title
+        else:
+            _row_titles.pop(name, None)
+    return title
+
+
+def cached_row_title(server: Any, name: Any) -> str:
+    """The title :func:`refresh_row_title` last read for *name*; memory only, for the loop."""
+    if server != LISTING_SERVER or not isinstance(name, str):
+        return ""
+    return _row_titles.get(name, "")
+
+
 def build_tool_schema(tool: DeclaredTool) -> ToolSchema:
     """The field-engine schema of *tool*: the same checks a core tool's arguments get.
 
