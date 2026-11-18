@@ -268,6 +268,13 @@ _PENDING_CLOSE: dict[tuple[str, str], list[tuple[Any, str]]] = {}
 #: ``set[(slug, app_name)]`` fast lookup: (slug, app) pairs with at least one
 #: unconfirmed-close handle.  Used by the delivery gate (fast path, no iteration).
 _PENDING_CLOSE_APPS: set[tuple[str, str]] = set()
+#: ``{session_id: int}`` retry attempt count per unconfirmed KAS session handle.
+#: When a handle exceeds :data:`_PENDING_CLOSE_MAX_RETRIES`, it is treated as
+#: confirmed closed (the host has forgotten the session) and removed.
+_PENDING_CLOSE_RETRIES: dict[str, int] = {}
+#: Maximum retry attempts before treating a KAS close as confirmed.
+#: After this many failures the session_id is unknown to the host.
+_PENDING_CLOSE_MAX_RETRIES: int = 5
 #: ``set[app_name]`` apps whose revocation is in progress (from the initial
 #: :func:`revoke_app_generation` call until :func:`stop_app_bot_chat_servers`
 #: returns).  While an app is in this set, the delivery gate rejects ALL entries
@@ -616,6 +623,10 @@ def check_and_filter_projection(
         # is blocked; other Bots' sessions for the same app can mount normally.
         if slug is not None and (slug, app_name) in _PENDING_CLOSE_APPS:
             _schedule_reconcile()
+            # Treat as "pending retry": excluded from _UNMOUNTED so after_app_change
+            # detects the gap and schedules a reload once the handle is confirmed.
+            if slug is not None:
+                _REPROJECT_SLUGS.setdefault(slug, set()).add(alias)
             continue
         # Re-check execution admission using this session's own Bot slug.
         if slug is not None and not _app_reaches(app_name, slug):
@@ -938,45 +949,119 @@ async def _drain_pending_close() -> None:
     """
     if not _PENDING_CLOSE:
         return
-    for key in list(_PENDING_CLOSE.keys()):
-        slug, app_name = key
-        handles = _PENDING_CLOSE.get(key)
-        if not handles:
-            _PENDING_CLOSE.pop(key, None)
-            _PENDING_CLOSE_APPS.discard(key)
-            _schedule_reconcile()
+    # First, collect unique session handles across all keys to avoid calling
+    # evict_session multiple times for the same KAS session_id.  The same handle
+    # (runtime, session_id) may appear under several (slug, app) keys when a session
+    # mounted multiple apps.
+    unique_handles: dict[str, tuple[Any, str]] = {}  # {session_id: (runtime, session_id)}
+    for handles in _PENDING_CLOSE.values():
+        for pc_runtime, pc_sid in list(handles):
+            if pc_sid not in unique_handles:
+                unique_handles[pc_sid] = (pc_runtime, pc_sid)
+
+    confirmed_sids: set[str] = set()
+    # Import AcpError here (body-scope) to avoid a circular import at module load.
+    try:
+        from kiro_crew.acp.transport_errors import AcpError as _AcpError
+    except ImportError:
+        _AcpError = None  # type: ignore[assignment, misc]
+    try:
+        from kiro_crew.acp.session_handle_runtime_contract import AcpRuntimeDead as _AcpRuntimeDead
+    except ImportError:
+        _AcpRuntimeDead = None  # type: ignore[assignment, misc]
+
+    for pc_sid, (pc_runtime, _) in list(unique_handles.items()):
+        retries = _PENDING_CLOSE_RETRIES.get(pc_sid, 0)
+        if retries >= _PENDING_CLOSE_MAX_RETRIES:
+            # Max retries reached.  We do NOT force-confirm: without evidence the
+            # session is closed, treating it as stopped risks leaving app code
+            # running.  Log a warning so the operator can see repeated 409s and
+            # investigate; retrying will keep trying.
+            logger.warning(
+                "bot chat app tools: drain: session %s has reached max retries (%d) "
+                "without confirmation; keeping handle — user will see continued 409",
+                pc_sid,
+                _PENDING_CLOSE_MAX_RETRIES,
+            )
+            # Reset counter so the next drain attempt is not immediately blocked.
+            _PENDING_CLOSE_RETRIES.pop(pc_sid, None)
             continue
-        for handle in list(handles):
-            pc_runtime, pc_sid = handle
-            try:
-                confirmed = await pc_runtime.evict_session(pc_sid)
-            except Exception:  # noqa: BLE001
-                confirmed = False
-                logger.warning(
-                    "bot chat app tools: drain: retry close for %s/%s session %s failed",
-                    slug,
-                    app_name,
+        try:
+            confirmed = await pc_runtime.evict_session(pc_sid)
+        except Exception as _exc:  # noqa: BLE001
+            # Two exception kinds count as confirmed:
+            # 1. AcpError with a numeric code: a JSON-RPC-level rejection from
+            #    the host.  The host answered but does not recognise the session_id
+            #    — the session is already freed.
+            # 2. AcpRuntimeDead: the runtime process has exited.  The session
+            #    cannot still be running in a dead process.
+            # Any other exception (timeout, pipe error) is genuinely unknown;
+            # count it toward the retry limit and leave the handle in place.
+            is_host_rejection = (
+                _AcpError is not None
+                and isinstance(_exc, _AcpError)
+                and getattr(_exc, "code", None) is not None
+            )
+            is_runtime_dead = _AcpRuntimeDead is not None and isinstance(_exc, _AcpRuntimeDead)
+            if is_host_rejection or is_runtime_dead:
+                logger.info(
+                    "bot chat app tools: drain: session %s is confirmed gone " "(%s — %s)",
                     pc_sid,
+                    "host RPC rejection" if is_host_rejection else "runtime dead",
+                    _exc,
+                )
+                confirmed = True
+            else:
+                confirmed = False
+                _PENDING_CLOSE_RETRIES[pc_sid] = retries + 1
+                logger.warning(
+                    "bot chat app tools: drain: retry close for session %s failed "
+                    "(attempt %d/%d)",
+                    pc_sid,
+                    retries + 1,
+                    _PENDING_CLOSE_MAX_RETRIES,
                     exc_info=True,
                 )
-            if confirmed:
-                # Per-entry remove: handles added during this await are unaffected.
+        else:
+            if not confirmed:
+                _PENDING_CLOSE_RETRIES[pc_sid] = retries + 1
+                logger.warning(
+                    "bot chat app tools: drain: retry close for session %s still "
+                    "unconfirmed (attempt %d/%d)",
+                    pc_sid,
+                    retries + 1,
+                    _PENDING_CLOSE_MAX_RETRIES,
+                )
+        if confirmed:
+            confirmed_sids.add(pc_sid)
+            _PENDING_CLOSE_RETRIES.pop(pc_sid, None)
+
+    # Remove confirmed handles from ALL keys that hold them, then unblock
+    # each key whose handle list is now empty.
+    for key in list(_PENDING_CLOSE.keys()):
+        slug, app_name = key
+        key_handles: list[tuple[Any, str]] = _PENDING_CLOSE.get(key) or []
+        if not key_handles:
+            _PENDING_CLOSE.pop(key, None)
+            _PENDING_CLOSE_APPS.discard(key)
+            _revocation_fence_clear(app_name)
+            _schedule_reconcile()
+            continue
+        for handle in list(key_handles):
+            _, pc_sid = handle
+            if pc_sid in confirmed_sids:
                 try:
                     _PENDING_CLOSE[key].remove(handle)
                 except (KeyError, ValueError):
                     pass  # already removed by a concurrent call
-            else:
-                logger.warning(
-                    "bot chat app tools: drain: retry close for %s/%s session %s still unconfirmed",
-                    slug,
-                    app_name,
-                    pc_sid,
-                )
         # Unblock only when the list is now genuinely empty.
         remaining = _PENDING_CLOSE.get(key)
         if remaining is not None and len(remaining) == 0:
             _PENDING_CLOSE.pop(key, None)
             _PENDING_CLOSE_APPS.discard(key)
+            # Last handle for this (slug, app) confirmed: lower the revocation
+            # fence if no other slugs still have handles for this app.
+            _revocation_fence_clear(app_name)
             _schedule_reconcile()
 
 
@@ -1066,6 +1151,10 @@ async def on_execution_trust_change(state: Any) -> None:
     for _sk, pending_apps in list(_PENDING_DELIVERY.items()):
         for app_name in pending_apps:
             app_slugs.setdefault(app_name, [])
+    # Also include apps with unconfirmed KAS close handles: those sessions may
+    # still be resident and running app code.
+    for _slug, app_name in _PENDING_CLOSE_APPS:
+        app_slugs.setdefault(app_name, [])
     if not app_slugs:
         return
     denied_apps: list[str] = []
@@ -1162,6 +1251,20 @@ async def stop_app_bot_chat_servers(state: Any, app_name: str) -> tuple[list[str
     # Drain any pending-close handles first, independent of _MOUNTED, so handles
     # from earlier cold starts are confirmed before we scan for new affected slugs.
     await _drain_pending_close()
+    # Collect any (slug, app_name) pairs that STILL have unconfirmed handles after
+    # the drain — these are failures regardless of whether _MOUNTED has an entry.
+    # This scan runs before the early-return check so a "nothing mounted" state
+    # still returns failures for unconfirmed handles (e.g. after a cold start).
+    failed: list[str] = []
+    for (pc_slug, pc_app), handles in _PENDING_CLOSE.items():
+        if pc_app == app_name and handles and pc_slug not in failed:
+            logger.warning(
+                "bot chat app tools: unconfirmed handle for %s/%s after drain; "
+                "reporting failure for retry",
+                pc_slug,
+                pc_app,
+            )
+            failed.append(pc_slug)
     pending_session_keys = [sk for sk, apps in list(_PENDING_DELIVERY.items()) if app_name in apps]
     affected = [
         slug
@@ -1169,12 +1272,12 @@ async def stop_app_bot_chat_servers(state: Any, app_name: str) -> tuple[list[str
         if any(alias.startswith(prefix) for alias in mounted)
     ]
     if not affected and not pending_session_keys:
-        # No sessions to stop: lower the fence immediately.
+        # No mounted or pending-delivery sessions to stop.  Lower the fence
+        # immediately if no unconfirmed handles remain.
         _revocation_fence_clear(app_name)
-        return [], []
+        return [], failed  # may carry pre-drain failures
 
     stopped: list[str] = []
-    failed: list[str] = []
     sessions = getattr(state, "sessions", None)
     try:
         for slug in affected:
@@ -1232,8 +1335,23 @@ async def stop_app_bot_chat_servers(state: Any, app_name: str) -> tuple[list[str
                     )
                     if unconfirmed_out:
                         pc_runtime, pc_sid = unconfirmed_out[0]
-                        _PENDING_CLOSE.setdefault((slug, app_name), []).append((pc_runtime, pc_sid))
-                        _PENDING_CLOSE_APPS.add((slug, app_name))
+                        # Register the unconfirmed handle under EVERY app that this
+                        # session was running (not just the current app_name).  A session
+                        # that mounts both app A and app B shares one KAS session_id;
+                        # confirming it confirms the close for both apps at once.
+                        # Only registering under the current app leaves the other apps
+                        # invisible to the retry path: when app B is stopped next, it
+                        # finds no pending handle, discard returns True, and B is
+                        # incorrectly treated as stopped even though the KAS session
+                        # (which carries B's server too) is still resident.
+                        apps_in_session = {
+                            alias.split(":")[0] for alias in mounted_snapshot if ":" in alias
+                        } or {app_name}
+                        for _shared_app in apps_in_session:
+                            _PENDING_CLOSE.setdefault((slug, _shared_app), []).append(
+                                (pc_runtime, pc_sid)
+                            )
+                            _PENDING_CLOSE_APPS.add((slug, _shared_app))
                     failed.append(slug)
                     continue
                 # Only remove from _MOUNTED when confirmed stopped AND snapshot matches.
@@ -1288,6 +1406,11 @@ async def stop_app_bot_chat_servers(state: Any, app_name: str) -> tuple[list[str
                             sk,
                             app_name,
                         )
+                        # Pending session could not be confirmed stopped.  Slug is not
+                        # known yet (record_mounted has not run), so use the session key
+                        # as a failure token so callers receive a non-empty failed list.
+                        if sk not in failed:
+                            failed.append(sk)
                 except Exception:  # noqa: BLE001
                     logger.warning(
                         "bot chat app tools: could not stop pending Bot chat %s (app %s)",
@@ -1295,6 +1418,11 @@ async def stop_app_bot_chat_servers(state: Any, app_name: str) -> tuple[list[str
                         app_name,
                         exc_info=True,
                     )
+                    if sk not in failed:
+                        failed.append(sk)
+        # Any (slug, app_name) pair that still has unconfirmed handles in
+        # _PENDING_CLOSE after the drain above has NOT been confirmed stopped.
+        # Include those slugs in failed so callers (e.g. trust revoke) know to
     finally:
         # Lower the revocation fence on every exit path: early return, normal
         # return, and unhandled exception.  _revocation_fence_clear only discards

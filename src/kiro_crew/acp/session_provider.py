@@ -143,6 +143,15 @@ class AcpSessionProvider(LLMProvider):
     #: The chat's agent-turn callback (``watch_agent_turns``), re-registered on
     #: each handle that replaces this session's. None: nothing watches.
     _agent_turn_callback: Callable[[], None] | None = None
+    #: Set to True by ``shutdown_shared`` when the session runs on a shared KAS
+    #: engine and ``session/close`` was not confirmed by the host (timeout or
+    #: refusal).  Read by ``discard_conversation(confirm_teardown=True)`` callers
+    #: (bot app stop) to treat an unconfirmed KAS close as a failure.
+    _kas_shutdown_unconfirmed: bool = False
+    #: Saved on an unconfirmed KAS close: the runtime to retry the remote close on.
+    _kas_unconfirmed_runtime: Any = None
+    #: Saved on an unconfirmed KAS close: the session_id to retry the remote close for.
+    _kas_unconfirmed_session_id: str | None = None
 
     # Applying a dashboard MCP config change to this live session by re-sending
     # its projection: ``kiro_crew.acp.session_provider_mcp_reinject``.

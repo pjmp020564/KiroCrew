@@ -308,7 +308,7 @@ def keep_record_on_teardown(self: AcpRuntime, session_id: str) -> _RecordKeeping
     return _RecordKeepingScope(self, session_id)
 
 
-async def evict_session(self: AcpRuntime, session_id: str) -> None:
+async def evict_session(self: AcpRuntime, session_id: str) -> bool:
     """Make the host drop a RESIDENT session while keeping its stored record.
 
     The standard ``session/close`` as a bounded request, then the local
@@ -325,15 +325,24 @@ async def evict_session(self: AcpRuntime, session_id: str) -> None:
     hold) is the state this call was reaching for. The local unregister always
     runs, so the reader loop stops routing to the departing queue even when the
     request could not be delivered.
+
+    Returns ``True`` when ``session/close`` was acknowledged by the host, or when
+    the runtime was already dead (the resident copy is gone regardless).
+    Returns ``False`` when the request timed out or failed: the session may still
+    be resident; callers that need a confirmed teardown should treat ``False`` as
+    unconfirmed.
     """
+    confirmed = True
     try:
         if not self._dead and self._process is not None:
             self._unconfirmed_teardowns.add(session_id)
+            confirmed = False  # Assume unconfirmed until the host responds.
             try:
                 await self._send_and_await(
                     METHOD_SESSION_CLOSE, {"sessionId": session_id}, timeout=_TERMINATE_TIMEOUT
                 )
                 self._unconfirmed_teardowns.discard(session_id)
+                confirmed = True
             except Exception:
                 logger.debug(
                     "session/close failed for %s (runtime dead/slow); proceeding with local unregister",
@@ -347,6 +356,7 @@ async def evict_session(self: AcpRuntime, session_id: str) -> None:
         harness_state = self._session_harness_states.pop(session_id, None)
         if harness_state is not None:
             await self._harness.end_session(harness_state)
+    return confirmed
 
 
 def can_release(self: AcpRuntime) -> bool:

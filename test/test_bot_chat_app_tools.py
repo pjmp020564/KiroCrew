@@ -113,6 +113,7 @@ def _fresh_record(_floor_monkeypatch):
     _floor_monkeypatch.setattr(tools, "_VOIDED_DELIVERY", {})
     _floor_monkeypatch.setattr(tools, "_PENDING_CLOSE", {})
     _floor_monkeypatch.setattr(tools, "_PENDING_CLOSE_APPS", set())
+    _floor_monkeypatch.setattr(tools, "_PENDING_CLOSE_RETRIES", {})
     _floor_monkeypatch.setattr(tools, "_REVOCATION_FENCE", set())
     _floor_monkeypatch.setattr(tools, "_RECONCILER", None)
     _floor_monkeypatch.setattr(tools, "_PROJECTION_GENS", {})

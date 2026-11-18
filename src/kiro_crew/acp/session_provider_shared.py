@@ -82,6 +82,20 @@ async def shutdown_shared(self: AcpSessionProvider) -> None:
             ):
                 with self._runtime.keep_record_on_teardown(self._handle.session_id):
                     await self._handle.destroy()
+                # session/close is confirmed when the runtime removed the session_id from
+                # _unconfirmed_teardowns.  If it is still present, the close timed out
+                # or was refused (the session may still be resident).  Record this on
+                # the provider so discard_conversation(confirm_teardown=True) callers
+                # can treat the unconfirmed case as a failure.
+                unconfirmed = getattr(self._runtime, "_unconfirmed_teardowns", ())
+                if self._handle.session_id in unconfirmed:
+                    self._kas_shutdown_unconfirmed = True
+                    # Save the runtime and session_id for a later retry attempt.
+                    # After shutdown the provider is detached from the session map, so
+                    # discard_conversation(confirm_teardown=True) callers that want to
+                    # retry the remote close must use this saved handle.
+                    self._kas_unconfirmed_runtime = self._runtime
+                    self._kas_unconfirmed_session_id = self._handle.session_id
             else:
                 await self._handle.destroy()
         except asyncio.CancelledError as exc:

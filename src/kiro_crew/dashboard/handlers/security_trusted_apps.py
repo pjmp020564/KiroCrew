@@ -753,18 +753,40 @@ async def api_trusted_app_revoke(request: web.Request) -> web.Response:
 
         disabled = False
         teardown_warnings: list[str] = []
+        _bot_failed: list[str] = []  # populated inside the was_granted block; read at the end
         # A builtin is never torn down: shipped code is exempt at the gate, so no
         # grant governs it and revoking one must not switch it off.
-        if was_granted and not is_builtin:
+        from kiro_crew import bot_chat_app_tools
+
+        # Run Bot teardown when: (a) this revoke just removed the grant
+        # (was_granted), OR (b) a previous 409 left Bot chats still running
+        # for this app (_MOUNTED still has an entry, or _PENDING_CLOSE_APPS
+        # still has an unconfirmed handle).  Condition (b) covers retries
+        # after the first 409: by that point was_granted is False (trust was
+        # already written), but the Bots are still running and must be stopped.
+        bots_still_active = any(
+            alias.startswith(f"{name}:")
+            for mounts in bot_chat_app_tools._MOUNTED.values()
+            for alias in mounts
+        ) or any(a == name for _, a in bot_chat_app_tools._PENDING_CLOSE_APPS)
+        needs_bot_teardown = (was_granted or bots_still_active) and not is_builtin
+        if needs_bot_teardown:
             # Stop any Bot chat still running this app's servers immediately,
             # regardless of whether the app's metadata is readable.  An app can
             # corrupt or delete its own installed.json; gating the Bot teardown on
             # get_app() lets a hostile app evade revocation at exactly the moment
             # it matters most.  Bump the revocation generation first so any
             # in-flight projection is fenced at mount time.
-            from kiro_crew import bot_chat_app_tools
-
             bot_chat_app_tools.revoke_app_generation(name)
+            # Note: revoke_app_generation raises the fence.  We collect the bot
+            # failure set for the 409, but we do NOT return early here — the
+            # trust write must happen even when Bot teardown is incomplete, so
+            # the user is not stuck in a state where the grant is still active
+            # but the teardown keeps failing.  The 409 at the end tells the
+            # caller "trust revoked, but Bots still running — retry teardown."
+            #
+            # Also include apps still in _PENDING_CLOSE (earlier KAS close
+            # unconfirmed): they count as affected sessions.
             _bot_stopped, _bot_failed = await bot_chat_app_tools.stop_app_bot_chat_servers(
                 request.app.get("state"), name
             )
@@ -773,23 +795,6 @@ async def api_trusted_app_revoke(request: web.Request) -> web.Response:
                     "trust revoke for %r: could not stop Bot chats for slugs %s",
                     name,
                     _bot_failed,
-                )
-                _audit(
-                    request,
-                    operation=op,
-                    outcome="failed",
-                    resources=f"{name} bot_chat_stop_incomplete slugs={_bot_failed}",
-                )
-                return web.json_response(
-                    {
-                        "error": (
-                            f"trust for {name!r} was NOT fully revoked: "
-                            f"Bot chats {_bot_failed} could not be stopped — retry"
-                        ),
-                        "code": "teardown_incomplete",
-                        "failures": _bot_failed,
-                    },
-                    status=409,
                 )
             record = await _run_off_loop(lambda: get_app(name))
             if record:
@@ -886,6 +891,37 @@ async def api_trusted_app_revoke(request: web.Request) -> web.Response:
                 status=409,
             )
 
+    if _bot_failed:
+        # Trust was written successfully but some Bot chats could not be stopped.
+        # Return 409 with the FRESH snapshot so the caller renders the updated
+        # trust state (the grant really IS gone) while knowing teardown is
+        # incomplete.  The grant is ALREADY revoked at this point.
+        _audit(
+            request,
+            operation=op,
+            outcome="partial",
+            resources=(
+                f"{name} was_granted={was_granted} disabled={disabled}"
+                f" bot_stop_failed={_bot_failed}"
+            ),
+        )
+        fresh_snap = await build_trusted_apps_snapshot_async()
+        return web.json_response(
+            {
+                "apps": fresh_snap["apps"],
+                "ineffective": fresh_snap["ineffective"],
+                "allowAll": fresh_snap["allowAll"],
+                "disabled": disabled,
+                "warnings": teardown_warnings,
+                "error": (
+                    f"trust for {name!r} was revoked but "
+                    f"Bot chats {_bot_failed} could not be stopped — retry"
+                ),
+                "code": "bot_chat_stop_incomplete",
+                "bots": _bot_failed,
+            },
+            status=409,
+        )
     _audit(
         request,
         operation=op,
@@ -1058,6 +1094,9 @@ async def api_trusted_apps_allow_all(request: web.Request) -> web.Response:
             for mounts in bot_chat_app_tools._MOUNTED.values()
             for alias in mounts
         }
+        # Also include apps with unconfirmed KAS close handles (_PENDING_CLOSE):
+        # these sessions may still be resident on the shared engine.
+        pending_close_apps = {a for _, a in bot_chat_app_tools._PENDING_CLOSE_APPS}
         # Also include apps in in-flight projections (_PROJECTION_GENS) that
         # have not yet reached record_mounted -- they would be missed by _MOUNTED.
         in_flight_apps = {
@@ -1071,15 +1110,29 @@ async def api_trusted_apps_allow_all(request: web.Request) -> web.Response:
             - granted
             - builtins
         )
-        # Revoked = any of the above sets.
-        revoked_mounted = (mounted_apps | in_flight_apps | all_candidate_apps) - granted - builtins
+        # Apps that actually need a fence: running, in-flight, or pending-close.
+        # These will have revoke_app_generation called on them (raises the fence).
+        actually_running = (mounted_apps | in_flight_apps | pending_close_apps) - granted - builtins
+        # Revoked = running + all candidates (generation bump for all; fence only for running).
+        revoked_mounted = (actually_running | all_candidate_apps) - granted - builtins
         if revoked_mounted:
-            for _app in revoked_mounted:
-                # Bump generation first to fence in-flight projections.
+            for _app in actually_running - granted - builtins:
+                # Bump generation AND raise fence only for apps actually running.
                 bot_chat_app_tools.revoke_app_generation(_app)
-            for _app in mounted_apps - granted - builtins:
+            # Candidates-only apps (not running) only need their generation bumped
+            # so stale in-flight projections are fenced at delivery.  No fence to
+            # raise or lower: nothing is running to confirm closed.
+            for _app in (all_candidate_apps - actually_running) - granted - builtins:
+                bot_chat_app_tools._APP_GENERATIONS[_app] = (
+                    bot_chat_app_tools._APP_GENERATIONS.get(_app, 0) + 1
+                )
+            for _app in (mounted_apps | pending_close_apps) - granted - builtins:
                 _, _bot_failed = await bot_chat_app_tools.stop_app_bot_chat_servers(state, _app)
                 bot_stop_failed.extend(_bot_failed)
+            # For apps that had a fence raised but stop_app_bot_chat_servers was
+            # not called (in-flight only, no _MOUNTED entry), lower the fence now.
+            for _app in (in_flight_apps - mounted_apps - pending_close_apps) - granted - builtins:
+                bot_chat_app_tools._revocation_fence_clear(_app)
             if bot_stop_failed:
                 logger.warning("blanket trust revoke: could not stop Bot chats %s", bot_stop_failed)
         if stopped or revoked_mounted:

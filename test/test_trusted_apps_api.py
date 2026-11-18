@@ -55,6 +55,7 @@ async def _noop_hook(name: str, record: dict, **_kw: object) -> dict:
     """
     return {}
 
+
 # A POPULATED config.json with a syntax error (trailing comma after
 # max_subagents). Every distinctive value below is one ``KiroCrewConfig.load()``
 # would silently replace with a default — so a mutation that loaded this file and
@@ -109,9 +110,7 @@ def test_snapshot_allow_all_string_true_is_not_truthy(home: Path):
     assert build_trusted_apps_snapshot()["allowAll"] is False
 
 
-def test_snapshot_marks_legacy_repository_grant_ineffective(
-    home: Path, tmp_path: Path
-):
+def test_snapshot_marks_legacy_repository_grant_ineffective(home: Path, tmp_path: Path):
     _install(tmp_path, _APP)
     meta = _read_installed(_APP)
     assert meta is not None
@@ -129,9 +128,7 @@ def test_snapshot_marks_legacy_repository_grant_ineffective(
     }
 
 
-def test_snapshot_keeps_installed_legacy_local_grant_effective(
-    home: Path, tmp_path: Path
-):
+def test_snapshot_keeps_installed_legacy_local_grant_effective(home: Path, tmp_path: Path):
     _install(tmp_path, _APP)
     (home / "config.json").write_text(
         json.dumps({"agent": {"apps_trusted": [_APP]}}), encoding="utf-8"
@@ -532,9 +529,9 @@ async def test_revoke_stops_the_backend_process_and_the_beacon(
         assert _LOOP_APP not in appbackend._processes
         after_revoke = beacon.read_text(encoding="utf-8")
         time.sleep(0.5)
-        assert beacon.read_text(encoding="utf-8") == after_revoke, (
-            "beacon advanced after revoke — third-party code is still executing"
-        )
+        assert (
+            beacon.read_text(encoding="utf-8") == after_revoke
+        ), "beacon advanced after revoke — third-party code is still executing"
         assert before is not None
     finally:
         await loop.run_in_executor(None, appbackend.stop_app_backend, _LOOP_APP)
@@ -699,9 +696,7 @@ async def test_revoke_succeeds_when_the_backend_was_merely_dead(
     assert _APP not in build_trusted_apps_snapshot()["apps"]
 
 
-def test_unstopped_backend_port_only_answers_for_a_declared_fixed_port(
-    home: Path, tmp_path: Path
-):
+def test_unstopped_backend_port_only_answers_for_a_declared_fixed_port(home: Path, tmp_path: Path):
     # The probe must not guess. `port: auto` lived only in the tracking entry
     # `stop_app_backend` just dropped, so there is nothing left to observe and the
     # answer is "cannot tell" (None), never a fabricated port.
@@ -798,13 +793,9 @@ async def test_blanket_off_sweeps_an_app_whose_metadata_says_disabled(
     with patch.object(security, "teardown_app_runtime", _teardown):
         async with _client() as client:
             assert (
-                await client.put(
-                    "/api/security/trusted-apps/allow-all", json={"value": True}
-                )
+                await client.put("/api/security/trusted-apps/allow-all", json={"value": True})
             ).status == 200
-            off = await client.put(
-                "/api/security/trusted-apps/allow-all", json={"value": False}
-            )
+            off = await client.put("/api/security/trusted-apps/allow-all", json={"value": False})
             assert off.status == 200, await off.text()
             body = await off.json()
 
@@ -818,9 +809,7 @@ async def test_blanket_off_sweeps_an_app_whose_metadata_says_disabled(
 
 
 @pytest.mark.asyncio
-async def test_blanket_off_sweeps_legacy_repository_grant(
-    home: Path, tmp_path: Path, mock_sel
-):
+async def test_blanket_off_sweeps_legacy_repository_grant(home: Path, tmp_path: Path, mock_sel):
     import kiro_crew.apps.teardown as appteardown
 
     torn: list[str] = []
@@ -849,31 +838,23 @@ async def test_blanket_off_sweeps_legacy_repository_grant(
 
     with patch.object(security, "teardown_app_runtime", _teardown):
         async with _client() as client:
-            off = await client.put(
-                "/api/security/trusted-apps/allow-all", json={"value": False}
-            )
+            off = await client.put("/api/security/trusted-apps/allow-all", json={"value": False})
             assert off.status == 200, await off.text()
 
     assert torn == [_APP]
 
 
 @pytest.mark.asyncio
-async def test_blanket_off_keeps_explicit_local_grant_running(
-    home: Path, tmp_path: Path, mock_sel
-):
+async def test_blanket_off_keeps_explicit_local_grant_running(home: Path, tmp_path: Path, mock_sel):
     _install(tmp_path, _APP, enabled=True)
     async with _client() as client:
         granted = await client.post(f"/api/security/trusted-apps/{_APP}")
         assert granted.status == 200, await granted.text()
         assert (
-            await client.put(
-                "/api/security/trusted-apps/allow-all", json={"value": True}
-            )
+            await client.put("/api/security/trusted-apps/allow-all", json={"value": True})
         ).status == 200
         with patch.object(security, "teardown_app_runtime") as teardown:
-            off = await client.put(
-                "/api/security/trusted-apps/allow-all", json={"value": False}
-            )
+            off = await client.put("/api/security/trusted-apps/allow-all", json={"value": False})
             assert off.status == 200, await off.text()
             teardown.assert_not_called()
 
@@ -947,13 +928,9 @@ async def test_blanket_off_sweeps_an_app_that_calls_itself_builtin(
     with patch.object(security, "teardown_app_runtime", _teardown):
         async with _client() as client:
             assert (
-                await client.put(
-                    "/api/security/trusted-apps/allow-all", json={"value": True}
-                )
+                await client.put("/api/security/trusted-apps/allow-all", json={"value": True})
             ).status == 200
-            off = await client.put(
-                "/api/security/trusted-apps/allow-all", json={"value": False}
-            )
+            off = await client.put("/api/security/trusted-apps/allow-all", json={"value": False})
             assert off.status == 200, await off.text()
 
     # The forged claim buys nothing: the app is still swept.
@@ -1003,9 +980,7 @@ async def test_teardown_deregisters_even_when_the_app_calls_itself_self_managed(
     assert dereg == [_APP]
 
 
-def test_unstopped_backend_port_prefers_the_gateway_recorded_port(
-    home: Path, tmp_path: Path
-):
+def test_unstopped_backend_port_prefers_the_gateway_recorded_port(home: Path, tmp_path: Path):
     # REGRESSION: the probe read the port from `get_app_manifest`, i.e. `app.json`
     # INSIDE the app directory — writable by any app trusted to run code. An app
     # could relabel its port (or claim `auto`) and hide from the liveness check that
@@ -1061,11 +1036,7 @@ async def test_disable_honors_the_resources_contract_but_revoke_does_not(
         assert dereg == []
 
         # Withdrawing trust: the self-report buys nothing.
-        assert (
-            await appteardown.teardown_app_runtime(
-                _APP, record, withdrawing_trust=True
-            )
-        ).ok
+        assert (await appteardown.teardown_app_runtime(_APP, record, withdrawing_trust=True)).ok
         assert dereg == [_APP]
 
 
@@ -1103,9 +1074,7 @@ async def test_teardown_runs_the_apps_own_on_disable_when_withdrawing_trust(
         patch.object(appteardown, "deregister_app", lambda name: None),
         patch.object(appteardown, "run_lifecycle_script", _script),
     ):
-        result = await appteardown.teardown_app_runtime(
-            _APP, record, withdrawing_trust=True
-        )
+        result = await appteardown.teardown_app_runtime(_APP, record, withdrawing_trust=True)
 
     assert result.ok, result.failures
     assert ran == [("stop-my-helper", 7)], "revoke did not run the app's own onDisable"
@@ -1156,9 +1125,7 @@ async def test_a_disabled_apps_own_code_is_not_launched_by_an_ordinary_disable(
         result = await appteardown.teardown_app_runtime(_APP, record)
 
     assert result.ok, result.failures
-    assert "should-not-run" not in ran, (
-        "an ordinary disable launched an idle app's own script"
-    )
+    assert "should-not-run" not in ran, "an ordinary disable launched an idle app's own script"
     assert "hook:run_app_hooks=False" in ran, ran
     # Everything that STOPS something still runs — the flag never skips those.
     assert stopped == [_APP], "the backend stop was skipped"
@@ -1208,14 +1175,12 @@ async def test_a_revoke_always_runs_the_shutdown_code_even_when_disabled(
         patch.object(appteardown, "deregister_app", lambda n: None),
         patch.object(appteardown, "run_lifecycle_script", _script),
     ):
-        result = await appteardown.teardown_app_runtime(
-            _APP, record, withdrawing_trust=True
-        )
+        result = await appteardown.teardown_app_runtime(_APP, record, withdrawing_trust=True)
 
     assert result.ok, result.failures
-    assert ran == ["stop-my-helper"], (
-        "a revoke skipped the only thing that can stop a detached helper"
-    )
+    assert ran == [
+        "stop-my-helper"
+    ], "a revoke skipped the only thing that can stop a detached helper"
     assert hook_kwargs == [True], hook_kwargs
 
 
@@ -1248,14 +1213,12 @@ async def test_an_observed_port_overrides_a_disabled_flag(home: Path, tmp_path: 
         patch.object(appteardown, "deregister_app", lambda n: None),
         patch.object(appteardown, "run_lifecycle_script", _script),
     ):
-        result = await appteardown.teardown_app_runtime(
-            _APP, record, withdrawing_trust=True
-        )
+        result = await appteardown.teardown_app_runtime(_APP, record, withdrawing_trust=True)
 
     assert result.ok, result.failures
-    assert ran == ["stop-my-helper"], (
-        "an app serving on an observed port was believed when it claimed to be off"
-    )
+    assert ran == [
+        "stop-my-helper"
+    ], "an app serving on an observed port was believed when it claimed to be off"
 
 
 @pytest.mark.asyncio
@@ -1290,9 +1253,7 @@ async def test_a_failing_on_disable_warns_but_never_refuses_the_withdrawal(
         patch.object(appteardown, "deregister_app", lambda name: None),
         patch.object(appteardown, "run_lifecycle_script", _script),
     ):
-        result = await appteardown.teardown_app_runtime(
-            _APP, record, withdrawing_trust=True
-        )
+        result = await appteardown.teardown_app_runtime(_APP, record, withdrawing_trust=True)
 
     assert result.ok is True, "a broken onDisable made trust unrevocable"
     assert result.failures == []
@@ -1325,9 +1286,7 @@ async def test_an_on_disable_that_raises_is_contained(home: Path, tmp_path: Path
         patch.object(appteardown, "deregister_app", lambda name: None),
         patch.object(appteardown, "run_lifecycle_script", _script),
     ):
-        result = await appteardown.teardown_app_runtime(
-            _APP, record, withdrawing_trust=True
-        )
+        result = await appteardown.teardown_app_runtime(_APP, record, withdrawing_trust=True)
 
     assert result.ok is True
     assert any("could not be run" in w for w in result.warnings), result.warnings
@@ -1524,6 +1483,6 @@ async def test_refused_builtin_grant_is_not_inherited_by_a_later_takeover(
     _write_installed(_BUILTIN, meta)
     assert _BUILTIN not in builtin_app_names(), "takeover fixture did not take effect"
 
-    assert app_execution_denied(_BUILTIN, action="enable") is not None, (
-        "a third-party app inherited a grant made against the builtin's name"
-    )
+    assert (
+        app_execution_denied(_BUILTIN, action="enable") is not None
+    ), "a third-party app inherited a grant made against the builtin's name"

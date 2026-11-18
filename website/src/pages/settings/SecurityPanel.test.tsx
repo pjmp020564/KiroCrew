@@ -1236,3 +1236,81 @@ describe('SecurityPanel — allow-all toggle inherits #1414 semantics', () => {
     expect(screen.queryByRole('switch', { name: /trust every third-party app/i })).toBeNull()
   })
 })
+
+/* ── bot_chat_stop_incomplete_revoked: applies snapshot + shows new message ──
+ *
+ * When revoke returns 409 bot_chat_stop_incomplete the trust WAS removed (the
+ * backend wrote the new config), but some Bot chats could not be stopped.  The
+ * UI must reflect that trust is gone (apply the snapshot) while naming the Bots
+ * still running — it must NOT say the change did not take effect.
+ *
+ * Without the snapshot application the row stays marked "trusted" after the
+ * mutation, and the user believes the app is still trusted when it is not:
+ * security-state misinformation on a path the backend explicitly designed to
+ * communicate the nuance.
+ */
+describe('SecurityPanel — bot_chat_stop_incomplete_revoked', () => {
+  const makeBot409 = (bots: string[]) => new ApiError(
+    409,
+    'Conflict',
+    JSON.stringify({
+      code: 'bot_chat_stop_incomplete',
+      bots,
+      apps: [],          // trust removed → empty list
+      ineffective: [],
+      allowAll: false,
+      disabled: false,
+    }),
+  )
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(api.deniedCommands as ReturnType<typeof vi.fn>).mockResolvedValue(snapshot())
+    ;(api.governancePolicy as ReturnType<typeof vi.fn>).mockResolvedValue(govNoPolicy())
+    ;(api.securityPosture as ReturnType<typeof vi.fn>).mockResolvedValue(posture())
+    ;(api.listTrustedApps as ReturnType<typeof vi.fn>).mockResolvedValue({
+      apps: ['auto-improvement'],
+      ineffective: [],
+      allowAll: false,
+    })
+    ;(api.untrustApp as ReturnType<typeof vi.fn>).mockRejectedValue(makeBot409(['atlas']))
+  })
+
+  it('applies the snapshot so the row is no longer marked trusted', async () => {
+    renderWithProviders(<SecurityPanel />, { route: '/?section=apps' })
+
+    const row = await screen.findByTestId('trusted-app-auto-improvement')
+    fireEvent.click(within(row).getByRole('button', { name: T.revoke() }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: T.revokeConfirmOk() }))
+
+    // The snapshot says apps: [] — the row must disappear, not stay "trusted".
+    await waitFor(() =>
+      expect(screen.queryByTestId('trusted-app-auto-improvement')).not.toBeInTheDocument(),
+    )
+  })
+
+  it('shows the revoked message, not the change_failed wrapper', async () => {
+    // Without this fix the error renders inside the change_failed template:
+    // "That change did not take effect: atlas are still running …"
+    // which contradicts the backend comment "grant is ALREADY revoked at this point".
+    renderWithProviders(<SecurityPanel />, { route: '/?section=apps' })
+
+    const row = await screen.findByTestId('trusted-app-auto-improvement')
+    fireEvent.click(within(row).getByRole('button', { name: T.revoke() }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: T.revokeConfirmOk() }))
+
+    // The new message says trust was removed.
+    expect(
+      await screen.findByText(
+        i18nT('pages.appsPage.bot_chat_stop_incomplete_revoked_one', { slugs: 'atlas', name: 'auto-improvement' }),
+      ),
+    ).toBeInTheDocument()
+
+    // The old change_failed wrapper must NOT appear.
+    expect(
+      screen.queryByText(i18nT('pages.settings.securityPanel.trustedApps.change_failed', { detail: '' })),
+    ).not.toBeInTheDocument()
+  })
+})
