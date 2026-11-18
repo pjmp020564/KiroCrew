@@ -4,7 +4,7 @@
  *  (./rows) and its one `actions` object; the row's memo compares both. */
 import { useRef, useEffect, useState, memo, useMemo, useContext, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { X, Pin, VolumeX, EyeOff, VenetianMask, MoreVertical, CornerDownRight, Split, Loader, Loader2, Bot, ExternalLink, Workflow, TriangleAlert, Goal, MessageCircleQuestionMark, ShieldCheck, Hourglass, GripVertical, Moon, Zap } from 'lucide-react'
+import { X, Pin, VolumeX, EyeOff, VenetianMask, MoreVertical, CornerDownRight, Split, Loader, Loader2, Bot, ExternalLink, Workflow, TriangleAlert, Goal, MessageCircleQuestionMark, ShieldCheck, Hourglass, GripVertical, Moon } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { shallowEqual } from 'react-redux'
 import { useAppDispatch, useAppSelector, type RootState } from '../../store'
@@ -54,7 +54,7 @@ import { SessionSourceChips } from './SessionSourceChips'
 import { useSessionCardLines, cardLineClass } from './cardLines'
 import { RowTrailingMeta, SearchHitTail } from './searchHits'
 import { connectedChannelLinks } from './connectedChannelLinks'
-import { CrewEyebrow } from '../../components/crew/CrewModeMarks'
+import { ConductorModeTitleMark } from '../../components/crew/CrewModeMarks'
 import { crewRootOf } from '../../lib/crewMode'
 import { summarizeCrewWorkers, crewRowCounts } from '../../lib/crewWorkers'
 import { CrewRowAttention, crewRowTooltip } from './CrewRowCounts'
@@ -1633,12 +1633,9 @@ export const SessionRow = memo(function SessionRow({ view, actions }: SessionRow
                 *  framer-only (no new CSS @keyframes). */}
               {/* A crewmate's own thread has no agent chip (its title is the name), so the
                 *  line starts at the Members-page chip with no placeholder gap before it. */}
-              {/* A Crew Mode root names the mode, not the conductor behind it: the
-                *  conductor is Crew Mode's to choose and may be swapped. The bolt sits
-                *  inline on this line rather than as a badge before the title, so the
-                *  title keeps the row's full width. */}
-              {crewRoot && <Zap size={12} aria-hidden="true" className="inline-block shrink-0 conductor-mode-accent" />}
-              {crewRoot && <CrewEyebrow active={crewWorking} />}
+              {/* A Conductor mode root leaves this line empty. Its coloured bolt
+                *  sits before the title below, so the title and the mark scan as
+                *  one item without repeating the mode name. */}
               {/* A code-channel row's agent name gives way first, so the Slack
                 *  mark and the time keep their room; other rows keep `shrink-0`. */}
               {memberTitle === null && !crewRoot && (
@@ -1878,6 +1875,9 @@ export const SessionRow = memo(function SessionRow({ view, actions }: SessionRow
                 <textarea ref={renameInputRef} rows={1} className={`w-full bg-bg-elevated border border-accent rounded px-1 py-0 ${ROW_TITLE_CLS} text-text-strong outline-hidden select-text resize-none block overflow-hidden focus-ring`} value={renameValue} onChange={e => onRenameChange(e.target.value)} {...ime.bindEnter<HTMLTextAreaElement>({ onEnter: () => { slotRenameEnterRef.current = true; (document.activeElement as HTMLTextAreaElement)?.blur() }, onEscape: onRenameCancel, onBlur: () => onRenameCommit(s.key, renameValue) })} onMouseDown={e => e.stopPropagation()} />
               ) : (
                 <>
+                  {/* Conductor mode is one coloured bolt before the title. The
+                      hidden name keeps the icon clear to screen readers. */}
+                  {crewRoot && <ConductorModeTitleMark />}
                   {/* The live dot leads the name, where the eye lands when
                       scanning a long list. It carries the row's working state
                       on its own (the status line below may be truncated or

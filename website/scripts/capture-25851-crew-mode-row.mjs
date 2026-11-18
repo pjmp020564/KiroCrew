@@ -1,18 +1,18 @@
 /**
- * Screenshot harness for #25851: the Crew Mode root row in the session list.
+ * Screenshot harness for the simplified Conductor mode marks.
  *
  * Runs the REAL built SPA (website/dist) behind the shared in-process static
  * server and answers every /api/** call from fixtures via Playwright route
  * interception -- gateway-free, no kiro-cli, no dashboard auth. The root row
- * carries the `crew_mode_root` stamp the gateway writes, so the row renders from
- * the same data it would read live.
+ * carries the `crew_mode_root` stamp the gateway writes, so the row and composer
+ * render from the same state they read live.
  *
  * Frames (1280x800, 2x), one per theme:
- *   <prefix>-<theme>.png   the session list, the Crew Mode root row among plain rows
- *
- * Asserts, before each frame, the layout the change is about: whether the row
- * draws the 26px ghost badge before its title, the eyebrow's letter spacing, and
- * the title's rendered width.
+ *   <prefix>-<theme>.png        the Conductor mode Sessions row
+ *   <prefix>-<theme>-full.png   the full chat and composer
+ *   <prefix>-dark-tip.png      the focused composer bolt and its name
+ *   <prefix>-dark-mobile.png   the narrow chat composer
+ *   <prefix>-dark-drawer.png   the narrow Sessions drawer
  *
  * Usage (in website/): node scripts/capture-25851-crew-mode-row.mjs <outDir> <prefix>
  */
@@ -54,6 +54,17 @@ const extra = async (path, route) => {
   if (path === '/api/agents/catalog') { await json(route, CATALOG); return true }
   if (path === `/api/chat/slots/${ROOT}/crew-workers`) { await json(route, WORKERS); return true }
   if (path === `/api/chat/slots/${ROOT}/crew-timeline`) { await json(route, { root: ROOT, lanes: [], gaps: [] }); return true }
+  if (path === `/api/chat/slots/${ROOT}`) {
+    await json(route, {
+      messages: [
+        { role: 'user', content: 'Write three haiku about the sea, trees and rain.', ts: '2026-10-28T08:01:00Z' },
+        { role: 'assistant', content: 'The crew finished all three haiku.', ts: '2026-10-28T08:12:00Z' },
+      ],
+      has_more: false,
+      total: 2,
+    })
+    return true
+  }
   if (path.startsWith('/api/chat/slots/') && !path.slice('/api/chat/slots/'.length).includes('/')) {
     await json(route, { messages: [], has_more: false, total: 0 }); return true
   }
@@ -73,27 +84,71 @@ async function main() {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 })
     const page = await context.newPage()
     logPageProblems(page)
-    await stubDashboardApi(page, { slots, theme, localStorageEntries: { 'mc-active-slot-chat': 'chat-plain', 'mc-lang': 'en' }, extra })
-    await page.goto(`${base}/chat?sid=chat-plain`, { waitUntil: 'domcontentloaded' })
+    await stubDashboardApi(page, {
+      slots,
+      theme,
+      localStorageEntries: {
+        'mc-active-slot-chat': ROOT,
+        'mc-lang': 'en',
+        'kc-locked-controls': '[]',
+      },
+      extra,
+    })
+    await page.goto(`${base}/chat?sid=${ROOT}`, { waitUntil: 'domcontentloaded' })
     const card = page.locator('[data-crew-root="true"]').first()
     await card.waitFor({ timeout: 20_000 })
     await page.waitForTimeout(1000)
-    const eyebrow = card.getByTestId('crew-eyebrow')
-    const spacing = await eyebrow.evaluate(el => getComputedStyle(el).letterSpacing)
+    const mark = card.getByTestId('conductor-mode-title-mark')
+    const composerMark = page.getByTestId('crew-mode-composer-chip')
     const badge = await card.getByTestId('crew-ghost-badge').count()
+    const modeText = await card.getByText('Conductor mode', { exact: true }).count()
     const titleWidth = await card.locator('[data-session-title]').first().evaluate(el => el.getBoundingClientRect().width)
-    console.log(`${PREFIX}/${theme}: badge=${badge} letter-spacing=${spacing} title-width=${titleWidth.toFixed(1)}px`)
+    console.log(`${PREFIX}/${theme}: badge=${badge} mode-text=${modeText} title-width=${titleWidth.toFixed(1)}px`)
     if (PREFIX === 'after') {
       assert(badge === 0, `${theme}: no ghost badge before the title`)
-      assert(spacing === '1px', `${theme}: eyebrow tracked a whole pixel`)
-      assert((await card.getByTestId('kiro-ghost-mark').count()) >= 1, `${theme}: inline ghost on the eyebrow line`)
+      assert(modeText === 0, `${theme}: no repeated Conductor mode text`)
+      assert((await mark.count()) === 1, `${theme}: one bolt before the title`)
+      assert((await mark.evaluate(el => el.parentElement?.hasAttribute('data-session-title'))) === true, `${theme}: bolt is inside the title line`)
+      assert((await composerMark.textContent()) === '', `${theme}: composer mark is only a bolt`)
     }
     // The row and the rows around it: the whole session-list width, a little above and below.
     const box = await card.boundingBox()
     const x = Math.max(0, box.x - 12)
     const y = Math.max(0, box.y - 40)
     await page.screenshot({ path: `${OUT}/${PREFIX}-${theme}.png`, clip: { x, y, width: box.width + 24, height: box.height + 140 } })
+    await page.screenshot({ path: `${OUT}/${PREFIX}-${theme}-full.png` })
+    if (theme === 'dark') {
+      await composerMark.focus()
+      const tip = page.getByRole('tooltip')
+      await tip.waitFor({ timeout: 5_000 })
+      assert((await tip.textContent()) === 'Conductor mode is on for this chat', 'dark: focused composer bolt names the mode')
+      await page.screenshot({ path: `${OUT}/${PREFIX}-dark-tip.png` })
+    }
     await context.close()
+
+    if (theme === 'dark') {
+      const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })
+      const mobile = await mobileContext.newPage()
+      logPageProblems(mobile)
+      await stubDashboardApi(mobile, {
+        slots,
+        theme,
+        localStorageEntries: {
+          'mc-active-slot-chat': ROOT,
+          'mc-lang': 'en',
+          'kc-locked-controls': '[]',
+        },
+        extra,
+      })
+      await mobile.goto(`${base}/chat?sid=${ROOT}`, { waitUntil: 'domcontentloaded' })
+      await mobile.getByTestId('crew-mode-composer-chip').waitFor({ timeout: 20_000 })
+      await mobile.waitForTimeout(800)
+      await mobile.screenshot({ path: `${OUT}/${PREFIX}-dark-mobile.png` })
+      await mobile.getByTestId('mobile-topbar-sessions-toggle').click()
+      await mobile.locator('[data-crew-root="true"]').first().waitFor({ timeout: 10_000 })
+      await mobile.screenshot({ path: `${OUT}/${PREFIX}-dark-drawer.png` })
+      await mobileContext.close()
+    }
   }
   await browser.close()
   srv.close()

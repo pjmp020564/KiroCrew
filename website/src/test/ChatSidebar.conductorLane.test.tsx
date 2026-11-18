@@ -232,29 +232,27 @@ afterEach(() => {
 })
 
 describe('chat sidebar — conductor lane', () => {
-  it('draws a conductor mode root as a plain row with an inline ghost, eyebrow, worker ghosts and what needs you', async () => {
+  it('draws a conductor root with one coloured bolt before its title and what needs you', async () => {
     const slots = [
       { key: 'k-root', title: 'Crew root', agent: 'kirocrew-conductor', messages: 1, running: false, modified: 4000, crew_mode_root: true },
       { key: 'k-w1', title: 'W1', messages: 2, running: false, modified: 3000, created_by: 'k-root', crew_root: 'k-root' },
       { key: 'k-w2', title: 'W2', messages: 0, running: false, pending_approval: true, modified: 2000, created_by: 'k-root', crew_root: 'k-root' },
       { key: 'k-plain', title: 'Plain chat', agent: 'kirocrew', messages: 1, running: false, modified: 1000 },
     ]
-    const { container, getByTestId, getAllByTestId } = renderSidebar(slots, [], null, {}, [], slots)
+    const { container, getByTestId } = renderSidebar(slots, [], null, {}, [], slots)
     const card = container.querySelector('[data-crew-root="true"]') as HTMLElement
     expect(card).toBeTruthy()
-    // A plain session row: no tinted card frame.
+    // A plain session row: no tinted card frame and no repeated mode label.
     expect(card.className).not.toContain('crew-card')
-    const eyebrow = within(card).getByTestId('crew-eyebrow')
-    expect(eyebrow).toHaveTextContent('Conductor mode')
-    // A whole-pixel tracking: an em fraction at this size renders "CRE W MODE".
-    expect(eyebrow.className).toContain('tracking-[1px]')
-    expect(eyebrow.className).not.toMatch(/tracking-\[[\d.]+em\]/)
-    // The conductor mode mark is a 12px lightning bolt inline on the eyebrow line, just
-    // before the eyebrow, not a badge before the title: the title keeps the row's width.
+    expect(within(card).queryByText('Conductor mode')).toBeNull()
     expect(within(card).queryByTestId('crew-ghost-badge')).toBeNull()
-    const bolt = eyebrow.previousElementSibling as SVGElement
-    expect(bolt.getAttribute('class')).toContain('lucide-zap')
-    expect(bolt.getAttribute('width')).toBe('12')
+    const title = within(card).getByTestId('conductor-mode-title-mark').closest('[data-session-title]') as HTMLElement
+    const bolt = within(title).getByTestId('conductor-mode-title-mark')
+    expect(title.firstElementChild).toBe(bolt)
+    expect(bolt).toHaveClass('conductor-mode-accent')
+    expect(bolt.querySelector('.lucide-zap')).toHaveAttribute('width', '14')
+    expect(bolt).toHaveAttribute('aria-label', 'Conductor mode')
+    expect(title).toHaveTextContent('Crew root')
     // The conductor's name is not shown: Crew Mode chooses it.
     expect(within(card).queryByText('kirocrew-conductor')).toBeNull()
     // The server's groups, not a guess from the rows: W2 waits on an approval.
@@ -267,31 +265,6 @@ describe('chat sidebar — conductor lane', () => {
     expect(within(live).queryByTestId('crew-worker-stack')).toBeNull()
     // The full counts stay in the tooltip.
     expect(getByTestId('crew-root-attention')).toHaveAttribute('title', '2 sessions, 1 needs you, and 1 waiting')
-    // Only the root wears the eyebrow.
-    expect(getAllByTestId('crew-eyebrow')).toHaveLength(1)
-    // An idle crew's tag stays still: motion on the list means work is running.
-    expect(eyebrow).toHaveAttribute('data-flowing', 'false')
-  })
-
-  it('flows the conductor mode tag only while the crew root has live work', () => {
-    const slots = [
-      { key: 'k-root', title: 'Crew root', agent: 'kirocrew-conductor', messages: 1, running: true, modified: 4000, crew_mode_root: true },
-      { key: 'k-plain', title: 'Plain chat', agent: 'kirocrew', messages: 1, running: false, modified: 1000 },
-    ]
-    const { container } = renderSidebar(slots, [], null, {}, [], slots)
-    const card = container.querySelector('[data-crew-root="true"]') as HTMLElement
-    expect(within(card).getByTestId('crew-eyebrow')).toHaveAttribute('data-flowing', 'true')
-  })
-
-  it('flows the conductor mode tag while a crew member runs, even with the root idle', () => {
-    const slots = [
-      { key: 'k-root', title: 'Crew root', agent: 'kirocrew-conductor', messages: 1, running: false, modified: 4000, crew_mode_root: true },
-      { key: 'k-w1', title: 'W1', messages: 2, running: true, modified: 3000, created_by: 'k-root', crew_root: 'k-root' },
-      { key: 'k-plain', title: 'Plain chat', agent: 'kirocrew', messages: 1, running: false, modified: 1000 },
-    ]
-    const { container } = renderSidebar(slots, [], null, {}, [], slots)
-    const card = container.querySelector('[data-crew-root="true"]') as HTMLElement
-    expect(within(card).getByTestId('crew-eyebrow')).toHaveAttribute('data-flowing', 'true')
   })
 
   it('counts the root\'s own question with the crew\'s approvals as needs you', async () => {

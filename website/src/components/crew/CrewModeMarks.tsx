@@ -1,12 +1,11 @@
-/** The small marks every Crew Mode surface shares: the solid ghost badge, the
- *  gradient "CREW MODE" eyebrow, a worker's state dot and a stack of tiny worker
- *  ghosts coloured by state. Colours are theme tokens (`styles/crew-mode.css`,
+/** The small marks every Crew Mode surface shares: the solid ghost badge,
+ *  the composer bolt, a worker's state dot and a stack of tiny worker ghosts
+ *  coloured by state. Colours are theme tokens (`styles/crew-mode.css`,
  *  `lib/crewWorkers.ts`), so light and dark themes follow without a branch here. */
-import { useEffect, useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { KiroGhostMark } from '../KiroGhostMark'
+import { InstantTip, useInstantTip } from '../InstantTip'
 import { Zap } from 'lucide-react'
-import { useReducedMotion as useLiveReducedMotion } from '../../hooks/useReducedMotion'
 import { i18nT } from '../../i18n/t'
 import { CREW_GROUP_LABEL_KEY, CREW_GROUP_TONE, type CrewWorkerGroup } from '../../lib/crewWorkers'
 
@@ -16,38 +15,6 @@ export function CrewGhostBadge({ size = 28 }: { size?: number }) {
     <span aria-hidden="true" data-testid="crew-ghost-badge" className="crew-grad shrink-0 rounded-full grid place-items-center" style={{ width: size, height: size }}>
       <KiroGhostMark size={Math.round(size * 0.5)} className="inline-block shrink-0 text-aim-fg" />
     </span>
-  )
-}
-
-/** "CREW MODE" in the crew gradient, the root row's first line. Tracked a whole
- *  pixel: an em fraction at this size lands letters on fractional pixels, which
- *  renders one gap wider than the rest.
- *  `active` (the crew is working) slides the gradient one tile per
- *  `CONDUCTOR_MODE_FLOW_SECONDS`; it stops the moment the work ends, and never moves
- *  under reduced motion, so the flow is a live-state signal rather than an
- *  always-on loop. The pace is quick enough to tell a working row from an idle
- *  one at a glance (at 5s the drift read as still). */
-export const CONDUCTOR_MODE_FLOW_SECONDS = 2
-
-export function CrewEyebrow({ active = false }: { active?: boolean } = {}) {
-  const reduceMotion = useLiveReducedMotion()
-  // The row list mounts under `AnimatePresence initial={false}`, which lands a
-  // mount-time `animate` on its last keyframe without playing it. Starting the
-  // flow one commit after mount makes it a change, which does play.
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
-  const flowing = active && !reduceMotion && mounted
-  return (
-    <motion.span
-      data-testid="crew-eyebrow"
-      data-flowing={flowing ? 'true' : 'false'}
-      className="crew-eyebrow-text font-bold uppercase tracking-[1px] truncate"
-      initial={{ backgroundPositionX: '0%' }}
-      animate={{ backgroundPositionX: flowing ? ['0%', '-200%'] : '0%' }}
-      transition={flowing ? { duration: CONDUCTOR_MODE_FLOW_SECONDS, ease: 'linear', repeat: Infinity } : { duration: 0 }}
-    >
-      {i18nT('components.crewMode.eyebrow')}
-    </motion.span>
   )
 }
 
@@ -80,12 +47,33 @@ export function CrewWorkerStack({ groups, max = 6 }: { groups: CrewWorkerGroup[]
   )
 }
 
-/** The composer's Crew Mode mark on a conductor chat: the lightning bolt and the
- *  name. With `onTurnOff` (no message sent yet) it is a pressed toggle: pressing
- *  it turns Crew Mode off. It renders in place, with no layout move.
- *  Without it, a read-only status: no pill, no hover or pressed state, not focusable. */
+/** One coloured bolt before a Conductor mode session title. */
+export function ConductorModeTitleMark() {
+  return (
+    <span
+      className="lucide-inline mr-1 shrink-0 conductor-mode-accent"
+      role="img"
+      aria-label={i18nT('components.crewMode.chip_off')}
+      title={i18nT('components.crewMode.chip_off')}
+      data-testid="conductor-mode-title-mark"
+    >
+      <Zap size={14} aria-hidden="true" />
+    </span>
+  )
+}
+
+/** The composer's Conductor mode mark is one lightning bolt. With
+ *  `onTurnOff` (no message sent yet) it is a pressed icon button. Without it,
+ *  it is a read-only status mark. Its accessible name keeps the hidden meaning.
+ *
+ *  The read-only mark shows that name in an `InstantTip` on hover, keyboard
+ *  focus and touch tap, so a sighted person can learn what the bolt means. It
+ *  is a focusable button with no click action, as the resource posture chip
+ *  is, so a tap has no click to lose (`openOnTap`). The bubble repeats the
+ *  accessible name, so the anchor carries no `aria-describedby`. */
 export function CrewModeComposerChip({ onTurnOff }: { onTurnOff?: () => void } = {}) {
   const reduceMotion = useReducedMotion()
+  const { tip, tipHandlers, tipId } = useInstantTip({ openOnTap: true })
   if (onTurnOff) {
     return (
       <motion.button
@@ -98,25 +86,30 @@ export function CrewModeComposerChip({ onTurnOff }: { onTurnOff?: () => void } =
         initial={reduceMotion ? { opacity: 0 } : false}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.2 }}
-        className="inline-flex items-center gap-1.5 h-7 px-1.5 -mx-1.5 rounded-md text-[12px] font-semibold shrink-0 cursor-pointer hover:bg-bg-hover"
+        className="inline-grid h-7 w-7 place-items-center rounded-md shrink-0 cursor-pointer hover:bg-bg-hover mc-touch-hit"
       >
-        <Zap size={13} aria-hidden="true" className="inline-block shrink-0 conductor-mode-accent" />
-        <span className="crew-grad-text">{i18nT('components.crewMode.chip_off')}</span>
+        <Zap size={16} aria-hidden="true" className="shrink-0 conductor-mode-accent" />
       </motion.button>
     )
   }
+  const label = i18nT('components.crewMode.composer_chip_label')
+  const { 'aria-describedby': _bubbleId, ...handlers } = tipHandlers
+  void _bubbleId
   return (
-    <motion.span
-      data-testid="crew-mode-composer-chip"
-      role="img"
-      aria-label={i18nT('components.crewMode.composer_chip_label')}
-      initial={reduceMotion ? { opacity: 0 } : false}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.2 }}
-      className="inline-flex items-center gap-1.5 h-7 text-[12px] font-semibold shrink-0 cursor-default select-none"
-    >
-      <Zap size={13} aria-hidden="true" className="inline-block shrink-0 conductor-mode-accent" />
-      <span className="crew-grad-text">{i18nT('components.crewMode.chip_off')}</span>
-    </motion.span>
+    <>
+      <motion.button
+        type="button"
+        data-testid="crew-mode-composer-chip"
+        aria-label={label}
+        {...handlers}
+        initial={reduceMotion ? { opacity: 0 } : false}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2 }}
+        className="inline-grid h-7 w-7 place-items-center shrink-0 cursor-default select-none focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        <Zap size={16} aria-hidden="true" className="shrink-0 conductor-mode-accent" />
+      </motion.button>
+      <InstantTip tip={tip} tipId={tipId} className="w-max max-w-[20rem] break-words">{label}</InstantTip>
+    </>
   )
 }

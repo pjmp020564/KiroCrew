@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
-import { CrewEyebrow, CrewGhostBadge, CrewModeComposerChip, CrewStatusDot, CrewWorkerStack } from './CrewModeMarks'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { CrewGhostBadge, CrewModeComposerChip, CrewStatusDot, CrewWorkerStack } from './CrewModeMarks'
+import { OPEN_DELAY_MS } from '../InstantTip'
 
 const reducedMotion = vi.hoisted(() => ({ value: false }))
 vi.mock('../../hooks/useReducedMotion', () => ({ useReducedMotion: () => reducedMotion.value }))
@@ -12,33 +13,6 @@ describe('CrewModeMarks', () => {
     expect(badge.className).toContain('crew-grad')
     expect(badge.style.width).toBe('20px')
     expect(badge.getAttribute('aria-hidden')).toBe('true')
-  })
-
-  it('the eyebrow is the gradient CREW MODE line', () => {
-    render(<CrewEyebrow />)
-    const eyebrow = screen.getByTestId('crew-eyebrow')
-    expect(eyebrow.className).toContain('crew-eyebrow-text')
-    expect(eyebrow.className).toContain('tracking-[1px]')
-    expect(eyebrow.textContent).toBe('Conductor mode')
-    // Idle by default: the gradient sits still.
-    expect(eyebrow).toHaveAttribute('data-flowing', 'false')
-  })
-
-  it('the eyebrow flows only while active, and stops when the work ends', () => {
-    const { rerender } = render(<CrewEyebrow active />)
-    expect(screen.getByTestId('crew-eyebrow')).toHaveAttribute('data-flowing', 'true')
-    rerender(<CrewEyebrow active={false} />)
-    expect(screen.getByTestId('crew-eyebrow')).toHaveAttribute('data-flowing', 'false')
-  })
-
-  it('the eyebrow never flows under reduced motion, even while active', () => {
-    reducedMotion.value = true
-    try {
-      render(<CrewEyebrow active />)
-      expect(screen.getByTestId('crew-eyebrow')).toHaveAttribute('data-flowing', 'false')
-    } finally {
-      reducedMotion.value = false
-    }
   })
 
   it('the status dot names the state in its tone, as text or for screen readers only', () => {
@@ -82,10 +56,55 @@ describe('CrewModeMarks', () => {
 
     rerender(<CrewModeComposerChip />)
     const mark = screen.getByTestId('crew-mode-composer-chip')
-    expect(mark.tagName).toBe('SPAN')
-    expect(mark.getAttribute('role')).toBe('img')
+    // Read-only: a focusable anchor for its tip, with no toggle state and no native title.
+    expect(mark.tagName).toBe('BUTTON')
+    expect(mark).not.toHaveAttribute('aria-pressed')
+    expect(mark).not.toHaveAttribute('title')
+    expect(mark).not.toHaveAttribute('aria-describedby')
     expect(mark.getAttribute('aria-label')).toBe('Conductor mode is on for this chat')
-    expect(mark.textContent).toBe('Conductor mode')
+    expect(mark.className).toContain('cursor-default')
+    expect(mark.textContent).toBe('')
+    expect(mark.querySelector('.lucide-zap')).not.toBeNull()
+  })
+
+  describe('the read-only bolt shows its name in a tip', () => {
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers() })
+
+    it('on hover, after the intent delay, and hides on leave', () => {
+      render(<CrewModeComposerChip />)
+      const mark = screen.getByTestId('crew-mode-composer-chip')
+      fireEvent.pointerEnter(mark, { pointerType: 'mouse' })
+      fireEvent.mouseEnter(mark)
+      expect(screen.queryByRole('tooltip')).toBeNull()
+      act(() => { vi.advanceTimersByTime(OPEN_DELAY_MS) })
+      expect(screen.getByRole('tooltip')).toHaveTextContent('Conductor mode is on for this chat')
+      fireEvent.mouseLeave(mark)
+      expect(screen.queryByRole('tooltip')).toBeNull()
+    })
+
+    it('on keyboard focus at once, and Escape hides it', () => {
+      render(<CrewModeComposerChip />)
+      const mark = screen.getByTestId('crew-mode-composer-chip')
+      fireEvent.focus(mark)
+      expect(screen.getByRole('tooltip')).toHaveTextContent('Conductor mode is on for this chat')
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(screen.queryByRole('tooltip')).toBeNull()
+    })
+
+    it('on a touch tap, since the mark has no click to lose', () => {
+      render(<CrewModeComposerChip />)
+      const mark = screen.getByTestId('crew-mode-composer-chip')
+      fireEvent.pointerEnter(mark, { pointerType: 'touch' })
+      fireEvent.pointerDown(mark, { pointerType: 'touch' })
+      fireEvent.pointerUp(mark, { pointerType: 'touch' })
+      fireEvent.mouseEnter(mark)
+      fireEvent.mouseDown(mark)
+      fireEvent.focus(mark)
+      fireEvent.mouseUp(mark)
+      fireEvent.click(mark)
+      expect(screen.getByRole('tooltip')).toHaveTextContent('Conductor mode is on for this chat')
+    })
   })
 
   it('marks conductor mode with a lightning bolt, not the ghost', () => {
