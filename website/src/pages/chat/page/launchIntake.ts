@@ -534,6 +534,8 @@ export function useAutoSendIntake({
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ slotKey?: unknown; text?: unknown }>).detail
       if (typeof detail?.text !== 'string' || !detail.text.trim()) return
+      // Taken: the store sends it itself only when no chat surface did.
+      e.preventDefault()
       void send(detail.text, typeof detail.slotKey === 'string' && detail.slotKey ? detail.slotKey : undefined)
     }
     window.addEventListener(BROWSER_HANDBACK_CHAT_EVENT, handler)

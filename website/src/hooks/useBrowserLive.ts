@@ -31,6 +31,8 @@
 import { useSyncExternalStore } from 'react'
 
 import { api } from '../api/client'
+import { sendTurn } from '../chat-core/transport/sendTurn'
+import { loadDrafts, mergeIntoDraft, saveDrafts, setDraft } from '../utils/chatDrafts'
 import { i18nT } from '../i18n/t'
 import { BROWSER_HANDBACK_CHAT_EVENT, type BrowserHandbackSaid } from '../api/client/browserLive'
 import type { BrowserInputEvent } from './useBrowserLive.input'
@@ -345,6 +347,8 @@ class BrowserLiveStore {
     reopen: (k: string, turnId: string) => api.browserLiveReopen(k, turnId) as Promise<unknown>,
     close: (k: string) => api.browserLiveClose(k) as Promise<unknown>,
     answer: (body: Parameters<typeof api.browserAskAnswer>[0]) => api.browserAskAnswer(body) as Promise<unknown>,
+    /** A hand-back note no chat surface took, sent as the person's message to the slot. */
+    chat: (k: string, text: string) => sendTurn({ message: text, slot: k }) as Promise<unknown>,
   }
 
   private session(key: string): SessionRecord {
@@ -700,9 +704,12 @@ class BrowserLiveStore {
       if (body && (answer as { delivered?: unknown } | null)?.delivered === 'chat') {
         // No agent op is parked to read it (the turn is over, or the agent is
         // between ops): it becomes the person's next chat message, exactly as if
-        // typed in the composer.
+        // typed in the composer. A mounted chat surface for the slot takes the
+        // event and sends it (calling preventDefault, so it is sent once); with
+        // none mounted (an app page showing `BrowserView`) the store sends it.
         const text = [choice, note].filter(Boolean).join(': ')
-        window.dispatchEvent(new CustomEvent(BROWSER_HANDBACK_CHAT_EVENT, { detail: { slotKey: sessionKey, text } }))
+        const taken = !window.dispatchEvent(new CustomEvent(BROWSER_HANDBACK_CHAT_EVENT, { detail: { slotKey: sessionKey, text }, cancelable: true }))
+        if (!taken) void this.sendNote(sessionKey, text)
       }
       this.handBackDrafts.delete(sessionKey)
       return true
@@ -711,6 +718,38 @@ class BrowserLiveStore {
       if (s.current?.turnId === before.turnId) this.setState(sessionKey, 'in_control', errorText(e))
       return false
     }
+  }
+
+  /**
+   * Send a hand-back note no chat surface took as the slot's next message. Unless
+   * the gateway confirmed it (dispatched or queued), the note is kept in the slot's
+   * composer draft and the record says so: "not sent" for a refusal, "not confirmed"
+   * for one that may have run (a transport error, `unknown`, a late answer), which
+   * is kept for the person to check, never sent again by itself.
+   */
+  private async sendNote(sessionKey: string, text: string): Promise<void> {
+    let status = 'unknown'
+    let reason = ''
+    try {
+      const receipt = (await this.writes.chat(sessionKey, text)) as { status?: unknown; reason?: unknown } | null
+      status = typeof receipt?.status === 'string' ? receipt.status : 'unknown'
+      reason = typeof receipt?.reason === 'string' ? receipt.reason : ''
+    } catch (e) {
+      reason = errorText(e)
+    }
+    if (status === 'dispatched' || status === 'queued') return
+    const drafts = loadDrafts()
+    setDraft(drafts, sessionKey, mergeIntoDraft(drafts[sessionKey], text))
+    const saved = saveDrafts(drafts)
+    const failed = status === 'refused'
+    // Only a refusal proves nothing ran: a transport error can follow a request the
+    // gateway already took (the connection reset before the answer came back).
+    // A draft the browser would not store (storage full) leaves the notice as the
+    // one place the note survives, so it carries the note itself.
+    const message = !saved
+      ? i18nT(failed ? 'appSdk.browserView.note_not_sent_not_saved' : 'appSdk.browserView.note_not_saved', { note: text })
+      : i18nT(failed ? 'appSdk.browserView.note_not_sent' : 'appSdk.browserView.note_unconfirmed')
+    this.failControl(sessionKey, new Error(reason ? `${message} ${reason}` : message))
   }
 
   /** What the person said in a hand-back that failed to send, for the bar to restore. */

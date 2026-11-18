@@ -692,6 +692,8 @@ export default function ChatPane({
     const handler = (e: Event) => {
       const d = (e as CustomEvent<{ slotKey?: unknown; text?: unknown }>).detail
       if (d?.slotKey !== slotKey || typeof d.text !== 'string' || !d.text.trim() || paneCrewRootClosed) return
+      // Taken: the store sends it itself only when no chat surface did.
+      e.preventDefault()
       doSend(d.text)
     }
     window.addEventListener(BROWSER_HANDBACK_CHAT_EVENT, handler)
