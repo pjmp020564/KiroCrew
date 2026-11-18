@@ -1668,8 +1668,14 @@ under a name other than the slug itself (a letter-case variant included) stays
 on this path after a Slack app is saved, `crew_oauth._card_claims` and
 `owner_servers.is_signable_name`, because that card routes the exact slug only
 and refusing the url would leave the entry on neither path), not legacy
-`type: "sse"`, with no credential
-header. With the preview on a bridged chat backend, the MCP Servers page's Sign
+`type: "sse"`, with no `Authorization` header (`crew_oauth.replaces_oauth`).
+Any other header, such as a backend token a gateway reads beside the OAuth
+bearer, is kept and sent upstream with Crew's bearer, its `${VAR}` placeholders
+expanded (`kas_env_launch.relay_crew_connection`); the status probe then reads
+the grant from Crew's vault under the custom key
+(`mcp_discovery_remote._record_grant_presence`), so the row offers Sign in
+instead of Not verified. A card keeps the broader rule: any credential-looking
+header keeps its own path (`crew_oauth.has_credential_header`). With the preview on a bridged chat backend, the MCP Servers page's Sign
 in runs Crew's sign-in (`dashboard/handlers/connections_custom_oauth.py`,
 `crew_oauth.signs_in_custom`). Its grant is keyed by name AND url
 (`crew_oauth.custom_key`: `custom-<sha256[:20]>`, vault entries
@@ -1679,7 +1685,9 @@ from the url without its query (`crew_oauth_dcr.prepare_custom`), which is also
 the `resource` and the audited url. Unlike a card it **commits no issuer**: it
 follows the one the url advertises, because the url is the owner's sealed record;
 `iss` is still checked. The client is the entry's `oauth.clientId` (public, or
-confidential with `clientSecret`), else Crew's own by DCR; the scopes are the
+confidential with `clientSecret`), else Crew's own by DCR, which asks for
+`client_secret_post` when the server lists it (some list Basic but read the
+client only from the form body; a card keeps `_AUTH_METHODS` order); the scopes are the
 entry's own (`kiro_entry_scopes`) ahead of a challenge's. Either client (the
 owner's, or one Crew just registered) is stored only with the pair it issued, in
 one vault write

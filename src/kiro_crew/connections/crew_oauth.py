@@ -371,7 +371,7 @@ def signs_in_custom(name: str, entry: Any) -> bool:
         isinstance(entry, dict)
         and entry.get("type") != "sse"
         and not _card_claims(name, entry)
-        and not has_credential_header(entry.get("headers"))
+        and not replaces_oauth(entry.get("headers"))
         and enabled()
         and _chat_backend_bridged()
     )
@@ -429,6 +429,19 @@ def has_credential_header(headers: Any) -> bool:
     )
 
 
+def replaces_oauth(headers: Any) -> bool:
+    """Whether *headers* already authenticates the request, so Crew's OAuth must stay out.
+
+    Only an ``Authorization`` header does: Crew's bridge sends its own bearer
+    there. Any other header (a backend token such as an MCP gateway's
+    ``x-backend-token``) is an ADDITION the server reads beside the OAuth bearer,
+    so it rides along instead of disabling the sign-in.
+    """
+    if not isinstance(headers, dict):
+        return False
+    return any(isinstance(k, str) and k.strip().lower() == "authorization" for k in headers)
+
+
 def routed_slug(name: str, entry: Any, provider_for_server: Any, backend: str | None = None) -> str:
     """The slug when Crew's sign-in serves this entry, else ``""``. Blocking.
 
@@ -439,9 +452,12 @@ def routed_slug(name: str, entry: Any, provider_for_server: Any, backend: str | 
     credential header keeps its own path. An owner-added server named for a slug
     whose card yields (:func:`_left_to_owner`) is the owner's, not the card's.
     """
-    if has_credential_header(entry.get("headers")):
+    if replaces_oauth(entry.get("headers")):
         return ""
     if name in SUPPORTED_SLUGS and not _left_to_owner(name, entry):
+        # A card's own entry with any credential-looking header keeps its own path.
+        if has_credential_header(entry.get("headers")):
+            return ""
         provider = (
             _dcr_provider(name, entry) if name in DCR_SLUGS else provider_for_server(name, entry)
         )

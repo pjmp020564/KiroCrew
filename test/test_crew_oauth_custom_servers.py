@@ -283,10 +283,14 @@ def test_an_owner_server_is_bridged_only_once_crew_holds_its_grant(owner):
     )
     # kiro-cli keeps its native path.
     assert crew_oauth.routed_slug("acme", entry, None, backend="kiro") == ""
-    # Its own credential header keeps its own path.
+    # Its own Authorization header keeps its own path.
     assert (
         crew_oauth.routed_slug("acme", {"url": MCP, "headers": {"Authorization": "x"}}, None) == ""
     )
+    # A backend-token header rides along with Crew's OAuth instead of disabling it.
+    assert crew_oauth.routed_slug(
+        "acme", {"url": MCP, "headers": {"x-backend-token": "Token x"}}, None, backend="kas"
+    ) == crew_oauth.custom_key("acme", MCP)
 
 
 def test_a_re_pointed_or_unrecorded_server_is_never_bridged(owner):
@@ -300,7 +304,12 @@ def test_the_dashboard_sign_in_goes_to_crew_only_with_the_flag_and_a_bridged_cha
     owner, monkeypatch
 ):
     assert crew_oauth.signs_in_custom("acme", {"url": MCP})
-    assert not crew_oauth.signs_in_custom("acme", {"url": MCP, "headers": {"X-Api-Key": "k"}})
+    # Only an Authorization header replaces the OAuth bearer; any other header
+    # (a backend token such as x-backend-token) is sent beside it.
+    assert not crew_oauth.signs_in_custom("acme", {"url": MCP, "headers": {"Authorization": "k"}})
+    assert crew_oauth.signs_in_custom(
+        "acme", {"url": MCP, "headers": {"x-backend-token": "Token k"}}
+    )
     monkeypatch.setattr(crew_oauth, "_chat_backend", lambda: "kiro")
     assert not crew_oauth.signs_in_custom("acme", {"url": MCP})
     monkeypatch.setattr(crew_oauth, "_chat_backend", lambda: "kas")
@@ -617,3 +626,22 @@ def test_a_custom_server_with_a_long_dcr_client_id_reaches_consent(vendor, monke
         await row["client"].shutdown()
 
     asyncio.run(_run())
+
+
+def test_an_owner_server_listing_both_secret_methods_registers_and_swaps_by_form(vendor):
+    """A hosted MCP gateway lists Basic but reads ``client_id`` only from the form."""
+    vendor.docs[f"{ISS}/.well-known/oauth-authorization-server"] = {
+        **AS_DOC,
+        "registration_endpoint": f"{ISS}/register",
+        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+    }
+    vendor.posts[f"{ISS}/register"] = [(201, {"client_id": "cid", "client_secret": "sec"}, "")]
+    key = crew_oauth.custom_key("gw", MCP)
+    plan = asyncio.run(crew_oauth_dcr.prepare_custom(key, MCP, {}))
+    registered = [c for c in vendor.calls if c[0] == "POST" and c[1].endswith("/register")]
+    assert registered[0][3]["token_endpoint_auth_method"] == "client_secret_post"
+    assert plan.client.auth_method == "client_secret_post"
+    vendor.posts[TOKEN_URL] = [(200, {"access_token": "at", "refresh_token": "rt"}, "")]
+    asyncio.run(crew_oauth_dcr.exchange(plan.client, "code", "v"))
+    _, _, form, _, auth = vendor.calls[-1]
+    assert (form["client_id"], form["client_secret"], auth) == ("cid", "sec", None)
