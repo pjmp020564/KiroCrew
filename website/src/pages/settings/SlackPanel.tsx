@@ -18,9 +18,10 @@ import { SchemaRestartBadge } from '../../components/settingRef/RestartRequiredB
 import { SlackCodeSection, slackCodeDraftFrom, slackCodePayload, type SlackCodeDraft } from './SlackCodePanel'
 import { SLACK_CODE_SWITCHES } from './slackCodeSwitches'
 import { forgetSlackInstallReading } from './SlackManifestUpdate'
+import { SlackSetupWizard } from './SlackSetupWizard'
 /** Brand name — do-not-translate, so it lives here rather than in the catalog. */
 const CHANNEL_NAME = "Slack"
-const SETUP_GUIDE = 'https://github.com/kirodotdev/KiroCrew/blob/main/src/kiro_crew/docs/slack-integration.md'
+const SETUP_GUIDE = 'https://github.com/kirodotdev/KiroCrew/blob/main/docs/guides/slack-setup.md'
 
 type Draft = {
   owner_id: string
@@ -250,7 +251,7 @@ export function SlackPanel() {
   // Public manifest template + one-click Slack create URL (no secrets).
   const manifestQ = useQuery({
     queryKey: ['slack-manifest'],
-    queryFn: api.getSlackManifest,
+    queryFn: () => api.getSlackManifest(),
     staleTime: Infinity,
     retry: false,
   })
@@ -287,6 +288,12 @@ export function SlackPanel() {
     setTimeout(() => setManifestCopied(false), 1500)
   }, [currentManifest])
   const [error, setError] = useState('')
+  // Open by default until Slack first connects, and it stays open once shown:
+  // its last step (send a test message) comes after the connection.
+  const [wizardOpen, setWizardOpen] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (data && wizardOpen === null) setWizardOpen(!data.connected)
+  }, [data, wizardOpen])
 
   // Sync the local draft when server config arrives. Guarded so only the
   // initial load and post-save invalidation reseed it — a background refetch
@@ -420,6 +427,7 @@ export function SlackPanel() {
   if (isError || !data || !draft) return <ErrorNotice className="m-4" message={i18nT('pages.settings.slackPanel.cannot_load_slack_config_is_the_gateway_running')} askAgent />
 
   const upd = (patch: Partial<Draft>) => setDraft(d => (d ? { ...d, ...patch } : d))
+  const showWizard = !!wizardOpen
   const ro = data.read_only
   // A click's own outcome (or one in flight) replaces the recorded reading:
   // both describe the same connection, and two notices read as two problems.
@@ -446,6 +454,11 @@ export function SlackPanel() {
             <StatusBadge config={data} />
             {/* Hidden on read-only remote sessions, like Save: the route is local-only. */}
             {!ro && reconnectBtn('slack-reconnect')}
+            {!showWizard && (
+              <Btn data-testid="slack-wizard-open" className="shrink-0" onClick={() => setWizardOpen(true)}>
+                {i18nT('pages.settings.slackWizard.title')}
+              </Btn>
+            )}
           </div>
           <p className="text-[12px] text-muted mt-1">
             {i18nT('pages.settings.slackPanel.talk_to_your_agents_from_slack_over_socket_mode')}
@@ -480,6 +493,19 @@ export function SlackPanel() {
             {i18nT('pages.settings.slackPanel.slack_settings_are_managed_on_the_machine_runnin')}
           </span>
         </div>
+      )}
+
+      {/* ── Setup wizard: the same writes as the form below, one step per screen ── */}
+      {showWizard && (
+        <SlackSetupWizard
+          data={data}
+          describeConnectError={describeConnectError}
+          orgGuideUrl={manifestQ.data?.org_guide_url}
+          // A wizard save changes the config this form was seeded from; reseed
+          // it, or a later form save would send the stale owner and tokens back.
+          onSaved={() => { syncArmed.current = true }}
+          onClose={() => setWizardOpen(false)}
+        />
       )}
 
       {/* ── Credentials guide ── */}
