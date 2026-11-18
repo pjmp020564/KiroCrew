@@ -93,17 +93,36 @@ def _failure_key(server_name: str, host: str, path: str) -> str:
     return hashlib.sha256(payload.encode("ascii")).hexdigest()
 
 
-def _vet_discovery_url(url: str) -> VettedUrl:
-    """SSRF-vet *url* and require HTTPS on port 443. Blocking (``getaddrinfo``)."""
-    vetted = vet_unfurl_url(url)
+def _vet_discovery_url(url: str, lan_host: str = "") -> VettedUrl:
+    """SSRF-vet *url* and require HTTPS on port 443. Blocking (``getaddrinfo``).
+
+    *lan_host* is the host of an OWNER-ADDED server's recorded url. A url on
+    exactly that host may resolve to a private-network or loopback address, as
+    the remote MCP probe already allows (``allow_private``): a corporate gateway
+    reached over a VPN is a normal setup kiro-cli itself connects to. Link-local
+    and metadata addresses stay refused, and every OTHER host keeps the
+    public-only rule, so a server's metadata cannot aim Crew at an internal
+    address the server does not itself live on.
+    """
+    try:
+        host = (urlsplit(url.strip()).hostname or "").lower() if lan_host else ""
+    except ValueError:
+        host = ""  # vet_unfurl_url refuses the url below
+    allow_private = bool(host) and host == lan_host.lower()
+    # Keep the default call shape unchanged: only the owner-server case passes
+    # the keyword, so every other caller (and its test doubles) sees vet(url).
+    vetted = vet_unfurl_url(url, allow_private=True) if allow_private else vet_unfurl_url(url)
     if vetted.scheme != "https" or vetted.port != _HTTPS_PORT:
         raise UnfurlRejected("blocked_url")
     return vetted
 
 
-async def _fetch_json(url: str) -> dict[str, Any]:
-    """Fetch one metadata document over a session pinned to its vetted addresses."""
-    vetted = await asyncio.to_thread(_vet_discovery_url, url)
+async def _fetch_json(url: str, lan_host: str = "") -> dict[str, Any]:
+    """Fetch one metadata document over a session pinned to its vetted addresses.
+
+    *lan_host*: see :func:`_vet_discovery_url`.
+    """
+    vetted = await asyncio.to_thread(_vet_discovery_url, url, lan_host)
     # One session per URL: a pinned connector serves exactly one host.
     async with aiohttp.ClientSession(connector=pinned_connector(vetted)) as session:
         return await _get_json(session, vetted.url, _FETCH_TIMEOUT_SECONDS)

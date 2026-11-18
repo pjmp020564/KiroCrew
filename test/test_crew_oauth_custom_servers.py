@@ -36,16 +36,19 @@ class Vendor:
             f"{ISS}/.well-known/oauth-authorization-server": dict(AS_DOC),
         }
         self.posts: dict[str, list] = {MCP: [(401, {}, f'Bearer resource_metadata="{RM}"')]}
+        self.lan_hosts: list[tuple[str, str]] = []
         self.calls: list[tuple] = []
 
-    async def fetch(self, url):
+    async def fetch(self, url, lan_host=""):
         self.calls.append(("GET", url))
+        self.lan_hosts.append((url, lan_host))
         if url not in self.docs:
             raise ValueError(f"{url} returned HTTP 404")
         return self.docs[url]
 
-    async def post(self, url, *, form=None, body=None, auth=None, headers=None):
+    async def post(self, url, *, form=None, body=None, auth=None, headers=None, lan_host=""):
         self.calls.append(("POST", url, form, body, auth))
+        self.lan_hosts.append((url, lan_host))
         answers = self.posts.get(url) or [(404, {}, "")]
         return answers.pop(0) if len(answers) > 1 else answers[0]
 
@@ -628,6 +631,52 @@ def test_a_custom_server_with_a_long_dcr_client_id_reaches_consent(vendor, monke
     asyncio.run(_run())
 
 
+def test_an_owner_servers_own_host_may_be_private_and_no_other_host(vendor):
+    """A VPN-only gateway (its host resolves to 10.x) signs in through Crew.
+
+    Discovery, registration, the code swap and the refresh on the owner's own
+    host are vetted with the private-network allowance; a card's calls, and an
+    AS endpoint on any other host, never are (``_vet_discovery_url``).
+    """
+    key = crew_oauth.custom_key("acme", MCP)
+    plan = asyncio.run(crew_oauth_dcr.prepare_custom(key, MCP, {"clientId": "c"}))
+    assert vendor.lan_hosts and all(h == "mcp.acme.example" for _, h in vendor.lan_hosts)
+    vendor.lan_hosts.clear()
+    vendor.posts[TOKEN_URL] = [(200, {"access_token": "at", "refresh_token": "rt"}, "")]
+    asyncio.run(crew_oauth_dcr.exchange(plan.client, "code", "v", owner_added=True))
+    crew_oauth_dcr.keep_client(key, plan.client, crew_oauth.Tokens("at", "rt", None, ""))
+    asyncio.run(crew_oauth_dcr.refresh(key, "rt"))
+    # The token endpoint is on another host, so it is offered the allowance but
+    # the vet only grants it to a url on exactly the owner's host.
+    assert vendor.lan_hosts == [(TOKEN_URL, "mcp.acme.example")] * 2
+    vendor.lan_hosts.clear()
+    asyncio.run(crew_oauth_dcr.exchange(plan.client, "code", "v"))
+    assert vendor.lan_hosts == [(TOKEN_URL, "")]
+
+
+def test_the_private_allowance_covers_only_the_named_host(monkeypatch):
+    import kiro_crew.mcp_oauth_discovery as disc
+    from kiro_crew.link_unfurl import UnfurlRejected
+
+    seen = []
+    real = disc.vet_unfurl_url
+
+    def vet(url, **kw):
+        seen.append((url, kw.get("allow_private", False)))
+        return real(url, resolve=lambda host, port: ["10.0.0.5"], **kw)
+
+    monkeypatch.setattr(disc, "vet_unfurl_url", vet)
+    lan = "gw.corp.example"
+    assert disc._vet_discovery_url(f"https://{lan}/.well-known/x", lan).port == 443
+    with pytest.raises(UnfurlRejected):
+        disc._vet_discovery_url("https://other.example/token", lan)
+    with pytest.raises(UnfurlRejected):
+        disc._vet_discovery_url(f"https://{lan}/.well-known/x")
+    with pytest.raises(UnfurlRejected):
+        disc._vet_discovery_url(f"http://{lan}/x", lan)
+    assert [p for _, p in seen] == [True, False, False, True]
+
+
 def test_an_owner_server_listing_both_secret_methods_registers_and_swaps_by_form(vendor):
     """A hosted MCP gateway lists Basic but reads ``client_id`` only from the form."""
     vendor.docs[f"{ISS}/.well-known/oauth-authorization-server"] = {
@@ -642,6 +691,6 @@ def test_an_owner_server_listing_both_secret_methods_registers_and_swaps_by_form
     assert registered[0][3]["token_endpoint_auth_method"] == "client_secret_post"
     assert plan.client.auth_method == "client_secret_post"
     vendor.posts[TOKEN_URL] = [(200, {"access_token": "at", "refresh_token": "rt"}, "")]
-    asyncio.run(crew_oauth_dcr.exchange(plan.client, "code", "v"))
+    asyncio.run(crew_oauth_dcr.exchange(plan.client, "code", "v", owner_added=True))
     _, _, form, _, auth = vendor.calls[-1]
     assert (form["client_id"], form["client_secret"], auth) == ("cid", "sec", None)

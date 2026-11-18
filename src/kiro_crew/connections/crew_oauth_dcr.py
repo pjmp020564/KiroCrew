@@ -170,14 +170,38 @@ class Plan:
 # --- HTTP: every call vetted and pinned --------------------------------------
 
 
-async def _session(url: str) -> tuple[Any, str]:
+def _host(url: str) -> str:
+    """*url*'s lower-cased host, or ``""`` when it has none or does not parse."""
+    try:
+        return (urllib.parse.urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+async def _fetch_json(url: str, lan_host: str = "") -> dict[str, Any]:
+    """One metadata document, vetted as :func:`kiro_crew.mcp_oauth_discovery._fetch_json`."""
+    from kiro_crew import mcp_oauth_discovery as disc
+
+    if lan_host:
+        return await disc._fetch_json(url, lan_host=lan_host)
+    return await disc._fetch_json(url)
+
+
+def _owner_lan_host(slug: str, client: Client) -> str:
+    """The host an owner-added server's own calls may reach privately, else ``""``."""
+    from kiro_crew.connections.crew_oauth import is_custom_key
+
+    return _host(client.resource) if is_custom_key(slug) else ""
+
+
+async def _session(url: str, lan_host: str = "") -> tuple[Any, str]:
     """A session that can reach only *url*'s vetted addresses, and the URL to use."""
     import aiohttp
 
     from kiro_crew.link_unfurl import pinned_connector
     from kiro_crew.mcp_oauth_discovery import _vet_discovery_url
 
-    vetted = await asyncio.to_thread(_vet_discovery_url, url)
+    vetted = await asyncio.to_thread(_vet_discovery_url, url, lan_host)
     timeout = aiohttp.ClientTimeout(total=_HTTP_TIMEOUT_SECS)
     return aiohttp.ClientSession(connector=pinned_connector(vetted), timeout=timeout), vetted.url
 
@@ -189,14 +213,18 @@ async def _post(
     body: Any = None,
     auth: Any = None,
     headers: dict[str, str] | None = None,
+    lan_host: str = "",
 ) -> tuple[int, dict[str, Any], str]:
-    """POST *url*; ``(status, JSON object or {}, WWW-Authenticate)``. Never logs a value."""
+    """POST *url*; ``(status, JSON object or {}, WWW-Authenticate)``. Never logs a value.
+
+    *lan_host*: see :func:`_vet`.
+    """
     import aiohttp
 
     from kiro_crew.link_unfurl import UnfurlRejected
 
     try:
-        session, target = await _session(url)
+        session, target = await (_session(url, lan_host) if lan_host else _session(url))
         async with session:
             async with session.post(
                 target,
@@ -305,9 +333,11 @@ async def _discover(
         _validate_issuer,
         same_issuer,
     )
-    from kiro_crew.mcp_oauth_discovery import _FETCH_ERRORS, _fetch_json
+    from kiro_crew.mcp_oauth_discovery import _FETCH_ERRORS
 
     mcp_url = str(provider["mcp_url"])
+    # Set only by :func:`prepare_custom`: an owner-added server's own host.
+    lan_host = str(provider.get("lan_host") or "")
     expected = (provider.get("l0_expectations") or {}).get("authorization_server")
     committed = _validate_issuer(expected) if expected else None
     initialize = {
@@ -328,6 +358,7 @@ async def _discover(
                 "Accept": "application/json, text/event-stream",
                 "MCP-Protocol-Version": MCP_CLIENT_PROTOCOL_VERSION,
             },
+            lan_host=lan_host,
         )
     except CrewOAuthError:
         # No challenge: the well-known documents below still name the issuer.
@@ -338,7 +369,7 @@ async def _discover(
     resource_doc: dict[str, Any] = {}
     for url in dict.fromkeys([*candidates, *_resource_metadata_urls(mcp_url)]):
         try:
-            resource_doc = await _fetch_json(url)
+            resource_doc = await _fetch_json(url, lan_host)
             advertised = _read_resource_metadata(resource_doc, mcp_url)
             break
         except _FETCH_ERRORS:
@@ -352,7 +383,7 @@ async def _discover(
         raise CrewOAuthError("issuer_changed")
     for url in _as_metadata_urls(committed):
         try:
-            doc = await _fetch_json(url)
+            doc = await _fetch_json(url, lan_host)
             if not same_issuer(_validate_issuer(doc.get("issuer")), committed):
                 raise CrewOAuthError("issuer_changed")
             for key in ("authorization_endpoint", "token_endpoint"):
@@ -429,7 +460,11 @@ async def _register(
     }
     if scope:
         request["scope"] = scope
-    status, answer, _ = await _post(_endpoint(doc, "registration_endpoint"), body=request)
+    status, answer, _ = await _post(
+        _endpoint(doc, "registration_endpoint"),
+        body=request,
+        lan_host=str(provider.get("lan_host") or ""),
+    )
     client_id = answer.get("client_id")
     if status not in (200, 201) or not isinstance(client_id, str) or not client_id:
         raise CrewOAuthError("registration_refused")
@@ -580,6 +615,7 @@ async def prepare_custom(
         "recommended_scopes": (
             [s for s in scopes if isinstance(s, str)] if isinstance(scopes, list) else []
         ),
+        "lan_host": _host(mcp_url),
         "owner_added": True,
     }
     store = store or ClientStore()
@@ -705,18 +741,24 @@ def _client_auth(client: Client, form: dict[str, str]) -> Any:
     return None
 
 
-async def _token(client: Client, form: dict[str, str]) -> dict[str, Any]:
+async def _token(client: Client, form: dict[str, str], lan_host: str = "") -> dict[str, Any]:
     form = {**form, "resource": client.resource}
     auth = _client_auth(client, form)
-    status, doc, _ = await _post(client.token, form=form, auth=auth)
+    status, doc, _ = await _post(client.token, form=form, auth=auth, lan_host=lan_host)
     error = doc.get("error")
     if status >= 400 or error:
         raise CrewOAuthError(safe_error_code(error, f"token_http_{status}"))
     return doc
 
 
-async def exchange(client: Client, code: str, verifier: str) -> dict[str, Any]:
-    """Swap the callback's code for tokens."""
+async def exchange(
+    client: Client, code: str, verifier: str, *, owner_added: bool = False
+) -> dict[str, Any]:
+    """Swap the callback's code for tokens.
+
+    *owner_added*: *client* serves an owner-added server, whose own host may be
+    on a private network (:func:`_vet`).
+    """
     return await _token(
         client,
         {
@@ -725,6 +767,7 @@ async def exchange(client: Client, code: str, verifier: str) -> dict[str, Any]:
             "redirect_uri": client.redirect_uri,
             "code_verifier": verifier,
         },
+        _host(client.resource) if owner_added else "",
     )
 
 
@@ -735,7 +778,11 @@ async def refresh(
     client, _ = await asyncio.to_thread((store or ClientStore()).read, slug)
     if client is None:
         raise CrewOAuthError("needs_auth")
-    return await _token(client, {"grant_type": "refresh_token", "refresh_token": refresh_token})
+    return await _token(
+        client,
+        {"grant_type": "refresh_token", "refresh_token": refresh_token},
+        _owner_lan_host(slug, client),
+    )
 
 
 async def revoke(slug: str, tokens: Tokens, store: ClientStore | None = None) -> bool:
@@ -749,12 +796,13 @@ async def revoke(slug: str, tokens: Tokens, store: ClientStore | None = None) ->
         pairs = [(tokens.access, "access_token")]
         if tokens.refresh:
             pairs.append((tokens.refresh, "refresh_token"))
+        lan_host = _owner_lan_host(slug, client)
         done = True
         for token, hint in pairs:
             form = {"token": token, "token_type_hint": hint}
             auth = _client_auth(client, form)
             try:
-                status, _, _ = await _post(client.revoke, form=form, auth=auth)
+                status, _, _ = await _post(client.revoke, form=form, auth=auth, lan_host=lan_host)
             except Exception:  # noqa: BLE001 -- one failed call never spares the other token
                 done = False
                 continue

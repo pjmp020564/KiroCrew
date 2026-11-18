@@ -1682,7 +1682,14 @@ in runs Crew's sign-in (`dashboard/handlers/connections_custom_oauth.py`,
 `CONNECTIONS_CUSTOM_<KEY>_OAUTH_TOKENS` / `_CLIENT`), and a session bridges the
 entry only while that grant is held (`crew_oauth._custom_slug`). Discovery runs
 from the url without its query (`crew_oauth_dcr.prepare_custom`), which is also
-the `resource` and the audited url. Unlike a card it **commits no issuer**: it
+the `resource` and the audited url. Discovery, registration and the token,
+refresh and revoke calls may reach a private-network or loopback address on the
+entry's own host only, as the remote MCP probe already allows
+(`mcp_oauth_discovery._vet_discovery_url` `lan_host`): a gateway reached over a
+VPN resolves to one. Every other host keeps the public-only vet, so the server's
+metadata cannot aim Crew at an internal address it does not live on; link-local
+and metadata addresses stay refused and HTTPS on 443 is still required. A card's
+calls stay public-only. Unlike a card it **commits no issuer**: it
 follows the one the url advertises, because the url is the owner's sealed record;
 `iss` is still checked. The client is the entry's `oauth.clientId` (public, or
 confidential with `clientSecret`), else Crew's own by DCR, which asks for

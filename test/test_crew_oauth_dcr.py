@@ -44,15 +44,18 @@ class Vendor:
         self.docs: dict[str, dict] = {}
         self.posts: dict[str, list] = {}
         self.calls: list[tuple] = []
+        self.lan_hosts: list[tuple[str, str]] = []
 
-    async def fetch(self, url):
+    async def fetch(self, url, lan_host=""):
         self.calls.append(("GET", url))
+        self.lan_hosts.append((url, lan_host))
         if url not in self.docs:
             raise ValueError(f"{url} returned HTTP 404")
         return self.docs[url]
 
-    async def post(self, url, *, form=None, body=None, auth=None, headers=None):
+    async def post(self, url, *, form=None, body=None, auth=None, headers=None, lan_host=""):
         self.calls.append(("POST", url, form, body, auth))
+        self.lan_hosts.append((url, lan_host))
         answers = self.posts.get(url) or [(404, {}, "")]
         return answers.pop(0) if len(answers) > 1 else answers[0]
 

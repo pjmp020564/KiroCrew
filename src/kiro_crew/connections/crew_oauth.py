@@ -934,7 +934,9 @@ class SignIn:
         from kiro_crew.connections.crew_oauth_dcr import ClientStore, exchange, forget_client
 
         try:
-            return await exchange(self._dcr.client, code, self._verifier)
+            return await exchange(
+                self._dcr.client, code, self._verifier, owner_added=self._custom is not None
+            )
         except CrewOAuthError as exc:
             if exc.code in ("invalid_client", "unauthorized_client"):
                 # The next Connect registers again instead of reusing the dead one.

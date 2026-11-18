@@ -122,7 +122,7 @@ def test_a_crew_held_card_reports_the_redirect_its_connect_registers(monkeypatch
             }
         raise ValueError(f"{url} returned HTTP 404")
 
-    async def _post(url, *, form=None, body=None, auth=None, headers=None):
+    async def _post(url, *, form=None, body=None, auth=None, headers=None, lan_host=""):
         if url == "https://mcp.atlassian.com/v2/mcp":
             return 401, {}, 'Bearer resource_metadata="https://mcp.atlassian.com/rm"'
         registered.append(body)
