@@ -761,6 +761,17 @@ _FETCH_CAUSE_AUTH = "auth"
 _FETCH_CAUSE_NETWORK = "network"
 _FETCH_CAUSE_TIMEOUT = "timeout"
 _FETCH_CAUSE_OTHER = "other"
+# A private ``https://github.com`` source that failed the first attempt and could
+# not be read through the host's ``gh`` either (see ``gh_credential.py``):
+# ``gh_missing`` no trusted ``gh`` on this computer, ``gh_signed_out`` ``gh`` is not
+# signed in to github.com, ``gh_no_access`` the signed-in account cannot read the
+# repository.
+_FETCH_CAUSE_GH_MISSING = "gh_missing"
+_FETCH_CAUSE_GH_SIGNED_OUT = "gh_signed_out"
+_FETCH_CAUSE_GH_NO_ACCESS = "gh_no_access"
+_GH_FETCH_CAUSES = frozenset(
+    {_FETCH_CAUSE_GH_MISSING, _FETCH_CAUSE_GH_SIGNED_OUT, _FETCH_CAUSE_GH_NO_ACCESS}
+)
 _REGISTRY_FETCH_CAUSES = frozenset(
     {
         _FETCH_CAUSE_DNS,
@@ -769,6 +780,7 @@ _REGISTRY_FETCH_CAUSES = frozenset(
         _FETCH_CAUSE_NETWORK,
         _FETCH_CAUSE_TIMEOUT,
         _FETCH_CAUSE_OTHER,
+        *_GH_FETCH_CAUSES,
     }
 )
 

@@ -47,6 +47,7 @@ from kiro_crew.apps.registry_pipeline import (
     caches,
     catalog,
     checkout,
+    gh_credential,
     git_targets,
     indexes,
     install,
@@ -72,6 +73,7 @@ _PIPELINE_PACKAGE = "kiro_crew.apps.registry_pipeline"
 PARTS: tuple[ModuleType, ...] = (
     subprocess_env,
     git_targets,
+    gh_credential,
     caches,
     sources,
     recovery,
