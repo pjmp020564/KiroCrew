@@ -45,10 +45,12 @@ def test_pinned_version_is_the_pin_unless_the_gateway_env_overrides_it(
 
 def test_the_public_surface_is_exactly_the_pin_and_the_engine_gate() -> None:
     assert sorted(kas_pin.__all__) == [
+        "KAS_CHECKS_AUTO_APPROVALS_MIN_ENGINE_VERSION",
         "KAS_PIN_MANIFEST_SHA256",
         "KAS_PIN_VERSION",
         "KAS_SPEC_PERMISSIONS_MIN_ENGINE_VERSION",
         "KAS_VERSION_OVERRIDE_ENV",
+        "engine_checks_auto_approvals",
         "engine_spec_permissions_supported",
         "pinned_version",
     ]

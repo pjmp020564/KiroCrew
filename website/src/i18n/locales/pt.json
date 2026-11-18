@@ -6618,6 +6618,17 @@
       "title_wants_to_run": "<title/> quer ser executado"
     },
     "approvalModePicker": {
+      "approve_for_me_failed": "Não foi possível ativar \"Aprovar por mim\". Tente de novo.",
+      "approve_for_me_busy": "Espere a resposta atual terminar e escolha Approve for me de novo.",
+      "approve_for_me_not_owners": "Approve for me só é oferecido em um chat que você conduz daqui, não em um ligado a um canal, a um agendamento ou a um app.",
+      "approve_for_me_label": "Aprovar por mim",
+      "approve_for_me_desc": "Neste chat, o KAS aprova por você as ações rotineiras, incluindo comandos de shell e edições de arquivos, e pergunta quando não tem certeza",
+      "approve_for_me_details": "Como o Approve for me funciona",
+      "approve_for_me_detail_skip": "{{productName}} verifica cada ação primeiro: comandos arriscados, arquivos sensíveis, suas regras de aprovação e hooks",
+      "approve_for_me_detail_direct": "Isso inclui leitura e edição de arquivos e comandos somente leitura que o KAS permite por conta própria",
+      "approve_for_me_detail_kept": "Se uma verificação disser não, você recebe o cartão de aprovação de sempre",
+      "approve_for_me_detail_off": "Fica desligado para mensagens de um canal, de um agendamento ou de qualquer pessoa além de você, e enquanto um perfil de administrador estiver aplicado",
+      "approve_for_me_detail_logged": "Cada ação aprovada assim fica registrada com o motivo do KAS",
       "nudge_body": "É aqui que você ajusta como o {{productName}} pede aprovação. Ao escolher \"Confiança\" aqui, ele pode trabalhar neste chat sem perguntar antes — você pode voltar atrás a qualquer momento.",
       "nudge_dismiss": "Entendi",
       "nudge_title": "Quer menos pedidos de aprovação?",

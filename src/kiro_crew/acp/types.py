@@ -122,6 +122,7 @@ from kiro_crew.acp_backends import (  # noqa: F401 - re-exported for existing im
     selectable_backends,
 )
 from kiro_crew.agent_sdk.backends import (  # noqa: F401 - re-exported for importers
+    ACP_BACKENDS_APPROVE_FOR_ME,
     escape_user_message_markup,
     wrap_user_message,
 )
@@ -519,6 +520,12 @@ KIRO_CLI_CLIENT_APPLICATION = "kirocrew"
 # ``secretStorage`` is NOT in this constant: the spawn adds it to a copy while
 # ``agent.kas_persist_mcp_sign_in`` is on (the default; ``acp/kas_secret_storage.py``),
 # and every other callback stays undeclared (= false).
+#
+# ``approveForMeOption`` asks the engine to list the session's ``approveForMe``
+# option, so Crew decides its value: always ``on`` or ``off``
+# (``acp/kas_approve_for_me.py``). ``checksAutoApprovals`` is NOT in this constant:
+# the runtime spawn adds it to a copy only for a process started with
+# approve-for-me on (``kas_approve_for_me.with_checks_auto_approvals``).
 KAS_CLIENT_CAPABILITIES: dict = {
     **ACP_CLIENT_CAPABILITIES,
     "_meta": {
@@ -526,6 +533,7 @@ KAS_CLIENT_CAPABILITIES: dict = {
             "settings": {"codeIntelligence": {"enabled": True}},
             "openExternalUrl": True,
             "userInput": True,
+            "approveForMeOption": True,
         }
     },
 }
@@ -1281,6 +1289,10 @@ class AcpEvent:
     #: default and for every other backend (codex included): the dashboard then
     #: offers no deny override and applies no session waiver.
     child_calls_marked: bool = False
+    #: kas_auto_approval: on a KAS permission request, what would have approved
+    #: the call with no request (``_meta.kiro.autoApproval.by``: ``classifier`` or
+    #: ``preset``), for a client that checks auto-approvals. ``""`` otherwise.
+    kas_auto_approval: str = ""
     # Canonical, NON-model-authored tool identity from adapter-authored
     # ``_meta.kiro`` or ``_meta.goose`` (see ``_dispatch._kiro_tool_name``).
     # ``title`` is LLM-authored prose — for shell tools ``select_tool_title``
