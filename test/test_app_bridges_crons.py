@@ -770,6 +770,7 @@ class TestCronServiceBridge:
             timeout=0,
             timeout_secs=0,
             strict_schedule=False,
+            approval_mode="",
             folder_id="",
             app_manifest_digest=ANY,
         )
@@ -949,6 +950,7 @@ class TestCronServiceBridge:
             timeout=0,
             timeout_secs=0,
             strict_schedule=False,
+            approval_mode="",
             folder_id="",
             app_manifest_digest=ANY,
         )

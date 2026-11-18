@@ -219,7 +219,7 @@ export type InstalledApp = {
     agents?: string[]
     skills?: string[]
     sops?: string[]
-    crons?: { name: string }[]
+    crons?: { name: string; approval_mode?: string }[]
     tags?: string[]
     jobFamilies?: string[]
     ui?: {
@@ -576,13 +576,13 @@ export function normalizeInstalledApp<T extends InstalledApp>(raw: T): T {
       repo: str(manifest.repo),
       screenshots: strings(manifest.screenshots),
       screenshotsDark: strings(manifest.screenshotsDark),
-      // A cron entry is only useful for its name, which is also the only field
-      // the dashboard reads, so an entry without one is dropped rather than
-      // rendered as a blank row.
+      // The dashboard reads a cron entry's name, and its `approval_mode` to say which
+      // jobs run without asking. An entry without a name is dropped rather than
+      // rendered as a blank row, and only the string "auto" is kept as a mode.
       crons: Array.isArray(manifest.crons)
-        ? manifest.crons.filter(
-            (c): c is { name: string } => !!c && typeof (c as { name?: unknown }).name === 'string',
-          )
+        ? manifest.crons
+            .filter((c): c is { name: string } => !!c && typeof (c as { name?: unknown }).name === 'string')
+            .map(c => ((c as { approval_mode?: unknown }).approval_mode === 'auto' ? { name: c.name, approval_mode: 'auto' } : { name: c.name }))
         : [],
       // Preserve ``ui.entry`` (and any extra keys) untouched: ``hasUI`` and
       // AppHost routing read entry truthiness, so injecting one would change

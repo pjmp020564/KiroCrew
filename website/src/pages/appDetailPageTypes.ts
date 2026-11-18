@@ -183,7 +183,7 @@ interface AppManifest {
   platform?: { requiresDesktopApp?: boolean; os?: string[] }
   agents?: string[]
   skills?: string[]
-  crons?: { name: string }[]
+  crons?: { name: string; approval_mode?: string }[]
   mcpServers?: Record<string, McpServerConfig>
   permissions?: AppPermissions
   minKiroCrewVersion?: string

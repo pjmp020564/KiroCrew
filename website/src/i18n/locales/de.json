@@ -11925,6 +11925,7 @@
       "close": "Schließen",
       "confirm_uninstall": "Deinstallation bestätigen",
       "copy_command": "Befehl kopieren",
+      "cron_auto_approval_desc": "Führt diese geplanten Aufgaben aus, ohne vor jedem Werkzeugaufruf nachzufragen: {{jobs}}. Gesperrte Aktionen und deine Sicherheitsrichtlinie gelten weiterhin.",
       "cron_yes": "Cron: ja",
       "desktop_app_hint": "Aktivieren geht von hier aus, aber das eigene Fenster der App braucht die {{productName}}-Desktop-App.",
       "details": "Details",

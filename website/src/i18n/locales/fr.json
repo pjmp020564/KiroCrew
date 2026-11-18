@@ -12196,6 +12196,7 @@
       "close": "Fermer",
       "confirm_uninstall": "Confirmer la désinstallation",
       "copy_command": "Copier la commande",
+      "cron_auto_approval_desc": "Exécute ces tâches planifiées sans te demander avant chaque appel d’outil : {{jobs}}. Les actions bloquées et ta politique de sécurité s’appliquent toujours.",
       "cron_yes": "Cron : oui",
       "desktop_app_hint": "Tu peux l'activer d'ici, mais la fenêtre propre à l'app nécessite l'app de bureau {{productName}}.",
       "details": "Détails",

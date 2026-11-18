@@ -67,6 +67,12 @@ class CronEntry:
     # delay (up to 59 minutes on a daily job), for a job whose time the user
     # chose on purpose -- a report wanted ready at 06:50, not near 07:40.
     strict_schedule: bool = False
+    # ``"auto"`` approves the job's tool calls without asking, after the deny rules
+    # and the governance ceiling, as a job the owner set to auto does. Only a job
+    # that names one of the app's agents may ask for it (``validate``); the app's
+    # page lists such jobs before the owner installs or enables the app. ``""``
+    # (the default) asks the owner for each call that is not otherwise approved.
+    approval_mode: str = ""
     # Schedule-page folder NAME to file the job in (names, not ids: a manifest
     # is portable across installs, and folder ids are minted per-machine by the
     # dashboard). Resolved against existing folders at registration; a name
@@ -128,6 +134,8 @@ class CronEntry:
             d["timeout_secs"] = self.timeout_secs
         if self.strict_schedule:
             d["strict_schedule"] = True
+        if self.approval_mode:
+            d["approval_mode"] = self.approval_mode
         if not self.persistent_session:
             d["persistent_session"] = False
         if self.silent:
@@ -232,6 +240,7 @@ class CronEntry:
             persistent_session=bool(data.get("persistent_session", True)),
             silent=bool(data.get("silent", False)),
             strict_schedule=_bool_or_false("strict_schedule", data.get("strict_schedule")),
+            approval_mode=_str_or_flagged("approval_mode", data.get("approval_mode")),
             # STRICT boolean: "enabled" gates whether a cron fires at all, so a
             # type slip (the string "false" is truthy) must not silently
             # re-enable a disabled-by-design cron. Non-boolean values are

@@ -11656,6 +11656,7 @@
       "close": "关闭",
       "confirm_uninstall": "确认卸载",
       "copy_command": "复制命令",
+      "cron_auto_approval_desc": "以下定时任务在每次调用工具前不会询问你：{{jobs}}。被阻止的操作和你的安全策略仍然生效。",
       "cron_yes": "Cron：是",
       "desktop_app_hint": "在这里可以启用，但该应用自己的窗口需要 {{productName}} 桌面端才能使用。",
       "details": "详情",

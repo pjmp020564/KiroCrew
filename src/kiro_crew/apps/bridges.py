@@ -104,6 +104,7 @@ if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and
         _deregister_crons,
         _field_digest,
         _join_stamp,
+        _manifest_approval_mode,
         _manifest_job_fields,
         _overwritten_fields,
         _register_crons,

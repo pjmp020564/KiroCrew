@@ -81,6 +81,7 @@ def _cron_defs_from_manifest(
                 "timeout": cron.timeout,
                 "timeout_secs": cron.timeout_secs,
                 "strict_schedule": cron.strict_schedule,
+                "approval_mode": cron.approval_mode,
             }
         )
         registered.append(namespaced)
@@ -232,6 +233,7 @@ _MANIFEST_OWNED_CRON_KEYS: tuple[str, ...] = (
     "timeout",
     "timeout_secs",
     "strict_schedule",
+    "approval_mode",
 )
 
 
@@ -241,7 +243,7 @@ _MANIFEST_OWNED_CRON_KEYS: tuple[str, ...] = (
 #: holds for it is a person's choice; only a manifest value other than this
 #: default is the author's change. Without it, the first pass after an upgrade
 #: would reset a hand-set value on every app job to the default.
-_LATE_KEY_DEFAULTS: dict[str, Any] = {"strict_schedule": False}
+_LATE_KEY_DEFAULTS: dict[str, Any] = {"strict_schedule": False, "approval_mode": ""}
 
 
 #: Hex characters kept of each per-key sha256. 12 (48 bits) tells "the author
@@ -345,9 +347,26 @@ def _manifest_job_fields(
         timeout=cron_def.get("timeout") or 0,
         timeout_secs=cron_def.get("timeout_secs") or 0,
         strict_schedule=bool(cron_def.get("strict_schedule", False)),
+        approval_mode=_manifest_approval_mode(cron_def),
         folder_id=folder_id,
         app_manifest_digest=digest,
     )
+
+
+def _manifest_approval_mode(cron_def: dict[str, Any]) -> str:
+    """The approval mode a manifest entry's job gets: ``"auto"`` only when the entry
+    asks for it AND names an agent, else ``""``.
+
+    ``AppManifest.validate`` refuses ``"auto"`` without an agent; this holds the same
+    line for an ``app-crons.json`` written by an older build, which was never
+    validated against it. A job with no agent is refused anyway
+    (``CronSDK._vet_agent``).
+    """
+    from kiro_crew.cron_service.identity import names_no_agent
+
+    if cron_def.get("approval_mode") != "auto":
+        return ""
+    return "" if names_no_agent(str(cron_def.get("agent") or "")) else "auto"
 
 
 #: The definition keys ``CronService.update_job`` has no branch for. They are the
@@ -375,6 +394,7 @@ _UPDATE_KWARGS_FOR_KEY: dict[str, tuple[str, ...]] = {
     "timeout": ("timeout",),
     "timeout_secs": ("timeout_secs",),
     "strict_schedule": ("strict_schedule",),
+    "approval_mode": ("approval_mode",),
 }
 
 
@@ -596,6 +616,7 @@ def _overwritten_fields(job: Any, update_kwargs: dict[str, Any]) -> list[tuple[s
         "timeout": int(job.timeout or 0),
         "timeout_secs": int(job.timeout_secs),
         "strict_schedule": bool(job.strict_schedule),
+        "approval_mode": job.approval_mode or "",
         "folder_id": job.folder_id or "",
     }
     changed: list[tuple[str, Any, Any]] = []

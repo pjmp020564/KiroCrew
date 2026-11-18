@@ -6731,6 +6731,7 @@
       "close": "Close",
       "confirm_uninstall": "Confirm uninstall",
       "copy_command": "Copy command",
+      "cron_auto_approval_desc": "Runs these scheduled jobs without asking you before each tool call: {{jobs}}. Blocked actions and your security policy still apply.",
       "cron_yes": "Cron: yes",
       "desktop_app_hint": "Enabling works from here, but the app's own window needs the {{productName}} desktop app.",
       "details": "Details",

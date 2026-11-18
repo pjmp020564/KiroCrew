@@ -304,7 +304,8 @@ refused.
     {
       "name": "ticket-refresh",
       "every": 300,
-      "message": "Check for new high-severity tickets"
+      "message": "Check for new high-severity tickets",
+      "agent": "ticket-analyst"
     },
     {
       "name": "daily-digest",
@@ -316,6 +317,7 @@ refused.
       "name": "market-open",
       "cron_expr": "30 9 * * 1-5",
       "message": "Summarise the overnight tape",
+      "agent": "digest-agent",
       "timezone": "America/New_York",
       "skip_dates": ["2026-12-25"]
     }
@@ -329,7 +331,7 @@ refused.
 | `every` | number | Interval in seconds (mutually exclusive with `cron_expr`) |
 | `cron_expr` | string | Cron expression (mutually exclusive with `every`) |
 | `message` | string | Prompt sent to the agent on each run |
-| `agent` | string | Agent template to run (optional, uses default if omitted). Name a template, never a Bot: an app cron is never bound to a Bot, so naming one runs that Bot's agent and workspace on the default memory store, not the Bot's own. Only the owner can give a Bot a schedule: `kirocrew cron add NAME MESSAGE --every SECONDS --agent <bot-key>`, or **New schedule** on the Bot's **Schedules** tab |
+| `agent` | string | Agent template to run. Required for a job that runs a model turn (one with no `command`, `script` or multi-step `agent_sequence`): name one of the app's own agents, declared under `agents`. A job that names none would run on the owner's default agent with all of the owner's tools, so it is not registered, and the gateway log names it. Name a template, never a Bot: an app cron is never bound to a Bot, so naming one runs that Bot's agent and workspace on the default memory store, not the Bot's own. Only the owner can give a Bot a schedule: `kirocrew cron add NAME MESSAGE --every SECONDS --agent <bot-key>`, or **New schedule** on the Bot's **Schedules** tab |
 | `agent_sequence` | string[] | Ordered agents to run |
 | `command` | string | Shell command executed without a model call; mutually exclusive with `script`. A present non-string value is rejected rather than treated as absent |
 | `script` | string | Synchronous Python callable (`file.py:function`) executed without a model call; mutually exclusive with `command`. A present non-string value is rejected rather than treated as absent. The path resolves against the app's own bundle, must stay inside it, must name a `.py` file, and is stored as an absolute path; re-enable the app after its bundle moves |
@@ -342,6 +344,7 @@ refused.
 | `timeout` | number | Seconds a `command` or `script` subprocess may run. `0` or omitted uses the scheduler default: 30s for a script, 300s for a command |
 | `timeout_secs` | number | Seconds one run may take in total, within 1..86400. `0` or omitted uses the scheduler default. On a `command` or `script` cron it must cover `timeout` (or that default) plus 5s of cleanup, so a script that runs 40s needs both, e.g. `"timeout": 60, "timeout_secs": 65`. A value the cron SDK would refuse is rejected at manifest validation |
 | `strict_schedule` | boolean | Default `false`. When `true` the job fires exactly on its schedule instead of after the scheduler's random start delay, which spreads jobs out and on a daily job can reach 59 minutes. Use it for a time the user chose on purpose, such as a report wanted ready at 06:50. Must be a JSON boolean; any other type is rejected at manifest validation |
+| `approval_mode` | string | `"auto"` or absent. With `"auto"` the job's tool calls run without asking the owner, after the deny rules and the security policy have checked each one, as a job the owner set to auto does. Only a job that names an `agent` may set it; validation refuses `"auto"` without one. The app's page lists each such job in its permissions card, so the owner sees it before installing or enabling the app. Absent: each call that is not otherwise approved asks the owner |
 | `enabled` | boolean | Default `true`. Must be a JSON boolean — any other type is rejected at manifest validation. When `false` the cron is registered **paused** (visible in the Schedule view, resumable) instead of firing on install/enable — for jobs that need user configuration first |
 
 A manifest that declares any `crons` must also declare `"cron": true` under
@@ -2652,7 +2655,8 @@ before it runs your command, which is the same silent failure:
     {
       "name": "ticket-refresh",
       "every": 300,
-      "message": "Check for new high-severity tickets"
+      "message": "Check for new high-severity tickets",
+      "agent": "ticket-analyst"
     }
   ],
   "ui": {

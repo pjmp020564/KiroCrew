@@ -11656,6 +11656,7 @@
       "close": "閉じる",
       "confirm_uninstall": "アンインストール確認",
       "copy_command": "コマンドをコピー",
+      "cron_auto_approval_desc": "次のスケジュールジョブは、ツールを呼び出すたびに確認せずに実行されます: {{jobs}}。ブロックされた操作とセキュリティポリシーは引き続き適用されます。",
       "cron_yes": "Cron: はい",
       "desktop_app_hint": "ここから有効にできますが、アプリ独自のウィンドウには {{productName}} デスクトップアプリが必要です。",
       "details": "詳細",

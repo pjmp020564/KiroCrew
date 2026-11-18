@@ -236,6 +236,7 @@ _CRON_FIELD_JSON_TYPES = {
     "timeout": "a whole number of seconds",
     "timeout_secs": "a whole number of seconds",
     "strict_schedule": "a boolean",
+    "approval_mode": 'the string "auto"',
 }
 
 #: Refusal for a manifest that schedules ``crons`` without the ``permissions.cron``
@@ -809,6 +810,19 @@ class AppManifest:
                 )
             except ValueError as exc:
                 errors.append(f"cron entry {cron.name!r}: {exc}")
+            if cron.approval_mode not in ("", "auto"):
+                errors.append(
+                    f'cron entry {cron.name!r}: approval_mode must be "auto" or absent, '
+                    f"got {cron.approval_mode!r}"
+                )
+            elif cron.approval_mode == "auto":
+                from kiro_crew.cron_service.identity import names_no_agent
+
+                if names_no_agent(cron.agent):
+                    errors.append(
+                        f"cron entry {cron.name!r}: approval_mode \"auto\" needs an 'agent' "
+                        "naming one of the app's own agents"
+                    )
             if cron.enabled_type_invalid:
                 errors.append(
                     f"cron entry {cron.name!r}: 'enabled' must be a JSON boolean "

@@ -12196,6 +12196,7 @@
       "close": "Cerrar",
       "confirm_uninstall": "Confirmar desinstalación",
       "copy_command": "Copiar comando",
+      "cron_auto_approval_desc": "Ejecuta estas tareas programadas sin preguntarte antes de cada llamada a una herramienta: {{jobs}}. Las acciones bloqueadas y tu política de seguridad siguen aplicándose.",
       "cron_yes": "Cron: sí",
       "desktop_app_hint": "Se puede activar desde aquí, pero la ventana propia de la app necesita la app de escritorio de {{productName}}.",
       "details": "Detalles",

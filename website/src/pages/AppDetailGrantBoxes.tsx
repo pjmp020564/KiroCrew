@@ -1,5 +1,6 @@
-import { EyeOff, Monitor, MessagesSquare, ShieldAlert, Webhook } from 'lucide-react'
+import { Clock, EyeOff, Monitor, MessagesSquare, ShieldAlert, Webhook } from 'lucide-react'
 import { i18nT } from '../i18n/t'
+import { fmtList } from '../i18n/format'
 import { desktopCapabilityLine, knownDesktopCapabilities, type DesktopCapability } from '../components/appstore/desktopCapabilities'
 import { chatLaunchLine, chatLaunchScopeLine, knownChatLaunch } from '../components/appstore/chatLaunch'
 
@@ -71,6 +72,26 @@ export function WebhookSourceBox({ source }: { source: string }) {
       </div>
       <div className="mt-1.5 text-[11px] text-muted">
         {i18nT('pages.appDetailPage.webhook_source_id')}: <code data-testid="webhook-source-id">{source}</code>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The manifest crons that declare `approval_mode: "auto"`: their tool calls run without
+ * asking, after the deny rules and the security policy. Nothing when none does.
+ */
+export function CronAutoApprovalBox({ crons }: { crons: { name: string; approval_mode?: string }[] | undefined }) {
+  const auto = (crons || []).filter(c => c.approval_mode === 'auto').map(c => c.name)
+  if (auto.length === 0) return null
+  return (
+    <div className="rounded-md border border-warn/30 bg-warn-subtle px-2.5 py-2" data-testid="cron-auto-approval">
+      <div className="flex items-start gap-2 text-text">
+        <Clock size={13} className="mt-[2px] shrink-0 text-warn" />
+        <span>{i18nT('pages.appDetailPage.cron_auto_approval_desc', { jobs: fmtList(auto, { style: 'narrow' }) })}</span>
+      </div>
+      <div className="mt-1.5 text-[11px] text-muted">
+        {i18nT('pages.appDetailPage.session_approval_manifest_key')}: <code>approval_mode</code>
       </div>
     </div>
   )
